@@ -62,10 +62,9 @@
  * results in a change in the backlight state the functions call the
  * update_status() operation.
  */
-
-static struct list_head backlight_dev_list;
-static struct mutex backlight_dev_list_mutex;
-static struct blocking_notifier_head backlight_notifier;
+static LIST_HEAD(backlight_dev_list);
+static DEFINE_MUTEX(backlight_dev_list_mutex);
+static BLOCKING_NOTIFIER_HEAD(backlight_notifier);
 
 static const char *const backlight_types[] = {
 	[BACKLIGHT_RAW] = "raw",
@@ -712,10 +711,6 @@ static int __init backlight_class_init(void)
 		pr_warn("Unable to create backlight class; errno = %d\n", ret);
 		return ret;
 	}
-
-	INIT_LIST_HEAD(&backlight_dev_list);
-	mutex_init(&backlight_dev_list_mutex);
-	BLOCKING_INIT_NOTIFIER_HEAD(&backlight_notifier);
 
 	return 0;
 }
