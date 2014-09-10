@@ -514,6 +514,66 @@ static int devm_backlight_device_match(struct device *dev, void *res,
 }
 
 /**
+ * backlight_device_lookup - find a backlight device
+ * @name: sysname of the backlight device
+ *
+ * @return Reference to the backlight device, NULL if not found.
+ *
+ * This searches through all registered backlight devices for a device with the
+ * given device name. In case none is found, NULL is returned, otherwise a
+ * new reference to the backlight device is returned. You must drop this
+ * reference via backlight_device_unref() once done.
+ * Note that the devices might get unregistered at any time. You need to lock
+ * around this lookup and inside of your backlight-notifier if you need to know
+ * when a device gets unregistered.
+ *
+ * This function can be safely called from IRQ context.
+ */
+struct backlight_device *backlight_device_lookup(const char *name)
+{
+	struct backlight_device *bd;
+	const char *t;
+
+	guard(mutex)(&backlight_dev_list_mutex);
+	list_for_each_entry(bd, &backlight_dev_list, entry) {
+		t = dev_name(&bd->dev);
+		if (t && !strcmp(t, name)) {
+			backlight_device_ref(bd);
+			return bd;
+		}
+	}
+
+	return NULL;
+}
+EXPORT_SYMBOL_GPL(backlight_device_lookup);
+
+/**
+ * backlight_set_brightness - set brightness on a backlight device
+ * @bd: backlight device to operate on
+ * @value: brightness value to set on the device
+ * @reason: backlight-change reason to use for notifications
+ *
+ * This is the in-kernel API equivalent of writing into the 'brightness' sysfs
+ * file. It calls into the underlying backlight driver to change the brightness
+ * value. The value is clamped according to device bounds.
+ * A uevent notification is sent with the reason set to @reason.
+ */
+void backlight_set_brightness(struct backlight_device *bd, unsigned int value,
+			      enum backlight_update_reason reason)
+{
+	guard(mutex)(&bd->ops_lock);
+	if (bd->ops) {
+		value = clamp(value, 0U,
+			      (unsigned int)bd->props.max_brightness);
+		dev_dbg(&bd->dev, "set brightness to %u\n", value);
+		bd->props.brightness = value;
+		backlight_update_status(bd);
+	}
+	backlight_generate_event(bd, reason);
+}
+EXPORT_SYMBOL_GPL(backlight_set_brightness);
+
+/**
  * backlight_register_notifier - get notified of backlight (un)registration
  * @nb: notifier block with the notifier to call on backlight (un)registration
  *
