@@ -30,6 +30,7 @@ enum backlight_update_reason {
 	 * @BACKLIGHT_UPDATE_SYSFS: The backlight was updated using sysfs.
 	 */
 	BACKLIGHT_UPDATE_SYSFS,
+	BACKLIGHT_UPDATE_DRM,
 };
 
 /**

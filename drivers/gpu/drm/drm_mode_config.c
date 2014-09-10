@@ -31,6 +31,7 @@
 #include <drm/drm_mode_config.h>
 #include <drm/drm_print.h>
 #include <linux/dma-resv.h>
+#include <drm/drm_backlight.h>
 
 #include "drm_crtc_internal.h"
 #include "drm_internal.h"
@@ -395,6 +396,12 @@ static int drm_mode_create_standard_properties(struct drm_device *dev)
 	if (!prop)
 		return -ENOMEM;
 	dev->mode_config.size_hints_property = prop;
+
+	prop = drm_property_create_range(dev, DRM_MODE_PROP_ATOMIC,
+					 "BRIGHTNESS", 0, U16_MAX);
+	if (!prop)
+		return -ENOMEM;
+	dev->mode_config.brightness_property = prop;
 
 	return 0;
 }

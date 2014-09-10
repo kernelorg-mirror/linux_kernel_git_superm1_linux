@@ -825,6 +825,11 @@ struct drm_mode_config {
 	 * the position of the output on the host's screen.
 	 */
 	struct drm_property *suggested_y_property;
+	/**
+	 * @brightness_property: Default connector property to control the
+	 * connector's backlight brightness.
+	 */
+	struct drm_property *brightness_property;
 
 	/**
 	 * @non_desktop_property: Optional connector property with a hint

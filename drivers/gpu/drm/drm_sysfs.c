@@ -23,6 +23,7 @@
 #include <linux/slab.h>
 
 #include <drm/drm_accel.h>
+#include <drm/drm_backlight.h>
 #include <drm/drm_connector.h>
 #include <drm/drm_device.h>
 #include <drm/drm_file.h>
@@ -303,11 +304,63 @@ static ssize_t connector_id_show(struct device *device,
 	return sysfs_emit(buf, "%d\n", connector->base.id);
 }
 
+static ssize_t backlight_show(struct device *device,
+			      struct device_attribute *attr,
+			      char *buf)
+{
+	struct drm_connector *connector = to_drm_connector(device);
+	int r;
+
+	if (!connector->backlight)
+		return -ENOTSUPP;
+
+	r = drm_backlight_get_name(connector->backlight, buf, PAGE_SIZE);
+	if (r < 0)
+		return r;
+
+	if (r + 1 < PAGE_SIZE) {
+		buf[r++] = '\n';
+		buf[r] = 0;
+	}
+
+	return r;
+}
+
+static ssize_t backlight_store(struct device *device,
+			       struct device_attribute *attr,
+			       const char *buf, size_t size)
+{
+	struct drm_connector *connector = to_drm_connector(device);
+	const char *t;
+	char *name;
+	size_t len;
+	int r;
+
+	if (!connector->backlight)
+		return -ENOTSUPP;
+
+	t = strchrnul(buf, '\n');
+	len = t - buf;
+
+	name = kstrndup(buf, len, GFP_KERNEL);
+	if (!name)
+		return -ENOMEM;
+
+	r = drm_backlight_set_name(connector->backlight, name);
+	kfree(name);
+
+	if (r < 0)
+		return r;
+
+	return size;
+}
+
 static DEVICE_ATTR_RW(status);
 static DEVICE_ATTR_RO(enabled);
 static DEVICE_ATTR_RO(dpms);
 static DEVICE_ATTR_RO(modes);
 static DEVICE_ATTR_RO(connector_id);
+static DEVICE_ATTR_RW(backlight);
 
 static struct attribute *connector_dev_attrs[] = {
 	&dev_attr_status.attr,
@@ -315,6 +368,7 @@ static struct attribute *connector_dev_attrs[] = {
 	&dev_attr_dpms.attr,
 	&dev_attr_modes.attr,
 	&dev_attr_connector_id.attr,
+	&dev_attr_backlight.attr,
 	NULL
 };
 
