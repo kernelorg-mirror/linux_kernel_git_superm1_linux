@@ -206,6 +206,12 @@ int backlight_device_set_brightness(struct backlight_device *bd,
 }
 EXPORT_SYMBOL(backlight_device_set_brightness);
 
+int backlight_device_get_brightness(struct backlight_device *bd)
+{
+	return bd->props.brightness;
+}
+EXPORT_SYMBOL(backlight_device_get_brightness);
+
 static ssize_t brightness_store(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t count)
 {

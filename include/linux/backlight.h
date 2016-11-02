@@ -413,6 +413,7 @@ struct backlight_device *backlight_device_get_by_name(const char *name);
 struct backlight_device *backlight_device_get_by_type(enum backlight_type type);
 int backlight_device_set_brightness(struct backlight_device *bd,
 				    unsigned long brightness);
+extern int backlight_device_get_brightness(struct backlight_device *bd);
 
 #if IS_REACHABLE(CONFIG_BACKLIGHT_CLASS_DEVICE)
 void backlight_notify_blank(struct backlight_device *bd,
