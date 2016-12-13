@@ -29,6 +29,7 @@
 #include <drm/drm_file.h>
 #include <drm/drm_mode_object.h>
 #include <drm/drm_print.h>
+#include <drm/drm_backlight.h>
 
 #include "drm_crtc_internal.h"
 
@@ -285,12 +286,52 @@ int drm_object_property_set_value(struct drm_mode_object *obj,
 				  struct drm_property *property, uint64_t val)
 {
 	int i;
+	struct drm_connector *connector = obj_to_connector(obj);
+	struct drm_property *dpms_property =
+		connector->dev->mode_config.dpms_property;
+	struct drm_property *brightness_property =
+		connector->dev->mode_config.brightness_property;
 
 	WARN_ON(drm_drv_uses_atomic_modeset(property->dev) &&
 		!(property->flags & DRM_MODE_PROP_IMMUTABLE));
 
 	for (i = 0; i < obj->properties->count; i++) {
+		/* If properties depends on each other
+		 * this is where to resolve that issue
+		 */
 		if (obj->properties->properties[i] == property) {
+			if (property == dpms_property) {
+				/* When DPMS goes from ON -> OFF,
+				 * set the brightness to the minimum possible
+				 * to save power.
+				 */
+				if (obj->properties->values[i] !=
+				    DRM_MODE_DPMS_OFF &&
+				    val == DRM_MODE_DPMS_OFF)
+					drm_backlight_set_brightness(
+						connector->backlight, 0);
+				/* When DPMS OFF -> ON, reset the brightness
+				 * to the original level
+				 */
+				else if (obj->properties->values[i] ==
+					 DRM_MODE_DPMS_OFF &&
+					 val != DRM_MODE_DPMS_OFF) {
+					uint64_t value;
+
+					drm_object_property_get_value(
+						obj, brightness_property,
+						&value);
+					drm_backlight_set_brightness(
+						connector->backlight, value);
+				}
+			} else if (property == brightness_property) {
+				/* only allow setting the brightness property
+				 * value, when dpms mode is on.
+				 */
+				if (connector->dpms == DRM_MODE_DPMS_ON)
+					obj->properties->values[i] = val;
+				return 0;
+			}
 			obj->properties->values[i] = val;
 			return 0;
 		}

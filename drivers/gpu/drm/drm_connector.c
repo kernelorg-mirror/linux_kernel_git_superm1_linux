@@ -3248,7 +3248,7 @@ int drm_connector_set_obj_prop(struct drm_mode_object *obj,
 	if (property == connector->dev->mode_config.dpms_property) {
 		ret = (*connector->funcs->dpms)(connector, (int)value);
 	} else if (property == config->brightness_property) {
-		if (connector->backlight)
+		if (connector->backlight && connector->dpms == DRM_MODE_DPMS_ON)
 			drm_backlight_set_brightness(connector->backlight,
 						     value);
 		ret = 0;
