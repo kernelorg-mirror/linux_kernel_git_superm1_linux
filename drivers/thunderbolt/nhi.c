@@ -37,6 +37,8 @@
 
 #define NHI_MAILBOX_TIMEOUT	500 /* ms */
 
+#define NHI_PM_TIMEOUT	1000
+
 static bool host_reset = true;
 module_param(host_reset, bool, 0444);
 MODULE_PARM_DESC(host_reset, "reset USB4 host router (default: true)");
@@ -1201,13 +1203,45 @@ static int nhi_runtime_suspend(struct device *dev)
 	return 0;
 }
 
+static int nhi_wait_ready(struct pci_dev *pdev)
+{
+	int delay;
+
+	for (delay = 1; delay < NHI_PM_TIMEOUT; delay *= 2) {
+		u16 pmcsr;
+
+		pci_read_config_word(pdev, pdev->pm_cap + PCI_PM_CTRL, &pmcsr);
+		if (!PCI_POSSIBLE_ERROR(pmcsr) &&
+		    (pmcsr & PCI_PM_CTRL_STATE_MASK) == (__force u16)PCI_D0)
+			break;
+		msleep(delay);
+	}
+
+	if (delay > NHI_PM_TIMEOUT) {
+		dev_err(&pdev->dev, "NHI not ready after %dms\n", NHI_PM_TIMEOUT);
+		return -ETIMEDOUT;
+	}
+
+	return 0;
+}
+
 static int nhi_runtime_resume(struct device *dev)
 {
+	struct pci_dev *pdev = to_pci_dev(dev);
 	struct tb *tb = dev_get_drvdata(dev);
 	struct tb_nhi *nhi = tb->nhi;
 	int ret;
 
-	if (nhi->ops->runtime_resume) {
+	/*
+	 * The NHI may have been runtime suspended at the same time as a
+	 * device was plugged in. In that case we need to wait for the NHI
+	 * to be ready before we can access it.
+	 */
+	ret = nhi_wait_ready(pdev);
+	if (ret)
+		return ret;
+
+	if (nhi->ops && nhi->ops->runtime_resume) {
 		ret = nhi->ops->runtime_resume(nhi);
 		if (ret)
 			return ret;
