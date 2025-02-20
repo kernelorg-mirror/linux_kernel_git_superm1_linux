@@ -57,13 +57,6 @@ struct atif_qbtc_arguments {
 	u8 requested_display;	/* which display is requested */
 } __packed;
 
-#define ATIF_QBTC_MAX_DATA_POINTS 99
-
-struct atif_qbtc_data_point {
-	u8 luminance;		/* luminance in percent */
-	u8 ipnut_signal;	/* input signal in range 0-255 */
-} __packed;
-
 struct atif_qbtc_output {
 	u16 size;		/* structure size in bytes (includes size field) */
 	u16 flags;		/* all zeroes */
@@ -73,7 +66,7 @@ struct atif_qbtc_output {
 	u8 min_input_signal;	/* max input signal in range 0-255 */
 	u8 max_input_signal;	/* min input signal in range 0-255 */
 	u8 number_of_points;	/* number of data points */
-	struct atif_qbtc_data_point data_points[ATIF_QBTC_MAX_DATA_POINTS];
+	struct amdgpu_dm_luminance_data data_points[MAX_LUMINANCE_DATA_POINTS];
 } __packed;
 
 #define ATIF_NOTIFY_MASK	0x3
