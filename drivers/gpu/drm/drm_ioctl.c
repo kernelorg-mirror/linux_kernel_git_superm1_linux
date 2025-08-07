@@ -28,6 +28,7 @@
  * OTHER DEALINGS IN THE SOFTWARE.
  */
 
+#include "drm/drm.h"
 #include <linux/export.h>
 #include <linux/nospec.h>
 #include <linux/pci.h>
@@ -372,6 +373,15 @@ drm_setclientcap(struct drm_device *dev, void *data, struct drm_file *file_priv)
 		if (req->value > 1)
 			return -EINVAL;
 		file_priv->supports_virtualized_cursor_plane = req->value;
+		break;
+	case DRM_CLIENT_CAP_LUMINANCE:
+		if (!drm_core_check_feature(dev, DRIVER_CONNECTOR_LUMINANCE))
+			return -EOPNOTSUPP;
+		if (!file_priv->atomic)
+			return -EINVAL;
+		if (req->value > 1)
+			return -EINVAL;
+		file_priv->supports_luminance_control = req->value;
 		break;
 	default:
 		return -EINVAL;
