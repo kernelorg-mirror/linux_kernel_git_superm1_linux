@@ -826,10 +826,10 @@ struct drm_mode_config {
 	 */
 	struct drm_property *suggested_y_property;
 	/**
-	 * @brightness_property: Default connector property to control the
-	 * connector's backlight brightness.
+	 * @luminance_property: Default connector property to control the
+	 * connector's backlight luminance.
 	 */
-	struct drm_property *brightness_property;
+	struct drm_property *luminance_property;
 
 	/**
 	 * @non_desktop_property: Optional connector property with a hint

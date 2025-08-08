@@ -40,5 +40,5 @@ void drm_backlight_unregister(struct drm_backlight *b);
 
 int drm_backlight_get_name(struct drm_backlight *b, char *buf, size_t max);
 int drm_backlight_set_name(struct drm_backlight *b, const char *name);
-void drm_backlight_set_brightness(struct drm_backlight *b, uint64_t value);
+void drm_backlight_set_luminance(struct drm_backlight *b, uint64_t value);
 #endif /* __DRM_BACKLIGHT_H__ */

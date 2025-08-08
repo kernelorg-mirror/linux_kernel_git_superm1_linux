@@ -289,8 +289,8 @@ int drm_object_property_set_value(struct drm_mode_object *obj,
 	struct drm_connector *connector = obj_to_connector(obj);
 	struct drm_property *dpms_property =
 		connector->dev->mode_config.dpms_property;
-	struct drm_property *brightness_property =
-		connector->dev->mode_config.brightness_property;
+	struct drm_property *luminance_property =
+		connector->dev->mode_config.luminance_property;
 
 	WARN_ON(drm_drv_uses_atomic_modeset(property->dev) &&
 		!(property->flags & DRM_MODE_PROP_IMMUTABLE));
@@ -308,7 +308,7 @@ int drm_object_property_set_value(struct drm_mode_object *obj,
 				if (obj->properties->values[i] !=
 				    DRM_MODE_DPMS_OFF &&
 				    val == DRM_MODE_DPMS_OFF)
-					drm_backlight_set_brightness(
+					drm_backlight_set_luminance(
 						connector->backlight, 0);
 				/* When DPMS OFF -> ON, reset the brightness
 				 * to the original level
@@ -319,13 +319,13 @@ int drm_object_property_set_value(struct drm_mode_object *obj,
 					uint64_t value;
 
 					drm_object_property_get_value(
-						obj, brightness_property,
+						obj, luminance_property,
 						&value);
-					drm_backlight_set_brightness(
+					drm_backlight_set_luminance(
 						connector->backlight, value);
 				}
-			} else if (property == brightness_property) {
-				/* only allow setting the brightness property
+			} else if (property == luminance_property) {
+				/* only allow setting the luminance property
 				 * value, when dpms mode is on.
 				 */
 				if (connector->dpms == DRM_MODE_DPMS_ON)

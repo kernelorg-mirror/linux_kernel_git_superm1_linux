@@ -141,7 +141,7 @@ static void __drm_backlight_real_changed(struct drm_backlight *b, uint64_t v)
 		set = div_u64(v << 16, max);
 
 	drm_object_property_set_value(&b->connector->base,
-				      config->brightness_property, set);
+				      config->luminance_property, set);
 }
 
 /* caller must hold @drm_backlight_lock */
@@ -204,7 +204,7 @@ int drm_backlight_alloc(struct drm_connector *connector)
 	connector->backlight = b;
 
 	drm_object_attach_property(&connector->base,
-				   config->brightness_property, U16_MAX);
+				   config->luminance_property, U16_MAX);
 
 	return 0;
 }
@@ -335,7 +335,7 @@ int drm_backlight_set_name(struct drm_backlight *b, const char *name)
 }
 EXPORT_SYMBOL(drm_backlight_set_name);
 
-void drm_backlight_set_brightness(struct drm_backlight *b, uint64_t value)
+void drm_backlight_set_luminance(struct drm_backlight *b, uint64_t value)
 {
 	guard(spinlock)(&drm_backlight_lock);
 	__drm_backlight_prop_changed(b, value);

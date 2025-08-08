@@ -398,10 +398,10 @@ static int drm_mode_create_standard_properties(struct drm_device *dev)
 	dev->mode_config.size_hints_property = prop;
 
 	prop = drm_property_create_range(dev, DRM_MODE_PROP_ATOMIC,
-					 "BRIGHTNESS", 0, U16_MAX);
+					 "LUMINANCE", 0, U16_MAX);
 	if (!prop)
 		return -ENOMEM;
-	dev->mode_config.brightness_property = prop;
+	dev->mode_config.luminance_property = prop;
 
 	return 0;
 }
