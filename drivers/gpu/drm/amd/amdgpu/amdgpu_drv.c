@@ -2596,6 +2596,17 @@ static int amdgpu_pmops_prepare(struct device *dev)
 
 static void amdgpu_pmops_complete(struct device *dev)
 {
+	struct drm_device *drm_dev = dev_get_drvdata(dev);
+	struct amdgpu_device *adev = drm_to_adev(drm_dev);
+
+	/* sequence failed, use a big 🔨 try to cleanup */
+	if (adev->in_suspend) {
+		adev->in_suspend = adev->in_s0ix = adev->in_s3 = false;
+		dev_crit(adev->dev, "pmpops sequence failed, resetting\n");
+		amdgpu_asic_reset(adev);
+		return;
+	}
+
 	amdgpu_device_complete(dev_get_drvdata(dev));
 }
 
