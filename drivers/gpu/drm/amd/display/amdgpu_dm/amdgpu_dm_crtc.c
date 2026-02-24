@@ -434,6 +434,86 @@ static void amdgpu_dm_crtc_disable_vblank(struct drm_crtc *crtc)
 						 acrtc_state, false);
 }
 
+/*
+ * Deferred vblank enable/disable works differently: the drm vblank core manages
+ * the workqueue instead of amdgpu_dm, sandwiching the vblank_enable/disable()
+ * with the crtc pre/post callbacks. Therefore, they need to be sequenced
+ * differently from their non-deferred variants.
+ */
+
+static int amdgpu_dm_crtc_deferred_enable_vblank(struct drm_crtc *crtc)
+{
+	struct amdgpu_device *adev = drm_to_adev(crtc->dev);
+	struct amdgpu_display_manager *dm = &adev->dm;
+	int ret;
+
+	ret = amdgpu_dm_crtc_set_vblank(crtc, true);
+	if (!ret)
+		dm->active_vblank_irq_count++;
+
+	return ret;
+}
+
+static void amdgpu_dm_crtc_deferred_disable_vblank(struct drm_crtc *crtc)
+{
+	struct amdgpu_device *adev = drm_to_adev(crtc->dev);
+	struct amdgpu_display_manager *dm = &adev->dm;
+
+	amdgpu_dm_crtc_set_vblank(crtc, false);
+
+	if (dm->active_vblank_irq_count)
+		dm->active_vblank_irq_count--;
+}
+
+
+static void amdgpu_dm_crtc_pre_enable_vblank(struct drm_crtc *crtc)
+{
+	struct amdgpu_device *adev = drm_to_adev(crtc->dev);
+	struct amdgpu_crtc *acrtc = to_amdgpu_crtc(crtc);
+	struct amdgpu_display_manager *dm = &adev->dm;
+
+	mutex_lock(&dm->dc_lock);
+	amdgpu_dm_ism_commit_event(&acrtc->ism,
+				   DM_ISM_EVENT_EXIT_IDLE_REQUESTED);
+}
+
+static void amdgpu_dm_crtc_post_enable_vblank(struct drm_crtc *crtc)
+{
+	struct amdgpu_device *adev = drm_to_adev(crtc->dev);
+	struct amdgpu_display_manager *dm = &adev->dm;
+
+	mutex_unlock(&dm->dc_lock);
+}
+
+static void amdgpu_dm_crtc_pre_disable_vblank(struct drm_crtc *crtc)
+{
+	struct amdgpu_device *adev = drm_to_adev(crtc->dev);
+	struct amdgpu_display_manager *dm = &adev->dm;
+
+	mutex_lock(&dm->dc_lock);
+}
+
+static void amdgpu_dm_crtc_post_disable_vblank(struct drm_crtc *crtc)
+{
+	struct amdgpu_device *adev = drm_to_adev(crtc->dev);
+	struct amdgpu_display_manager *dm = &adev->dm;
+	struct amdgpu_crtc *acrtc = to_amdgpu_crtc(crtc);
+	struct drm_vblank_crtc *vblank = drm_crtc_vblank_crtc(crtc);
+
+	/* If a vblank_get got ahead of us (can happen when !disable_immediate),
+	 * skip panel optimizations
+	 */
+	if (atomic_read(&vblank->refcount) > 0) {
+		mutex_unlock(&dm->dc_lock);
+		return;
+	}
+
+	amdgpu_dm_ism_commit_event(&acrtc->ism,
+				   DM_ISM_EVENT_ENTER_IDLE_REQUESTED);
+
+	mutex_unlock(&dm->dc_lock);
+}
+
 static void amdgpu_dm_crtc_destroy_state(struct drm_crtc *crtc,
 				  struct drm_crtc_state *state)
 {
@@ -609,6 +689,33 @@ static const struct drm_crtc_funcs amdgpu_dm_crtc_funcs = {
 #endif
 };
 
+static const struct drm_crtc_funcs amdgpu_dm_crtc_deferred_vblank_funcs = {
+	.reset = amdgpu_dm_crtc_reset_state,
+	.destroy = amdgpu_dm_crtc_destroy,
+	.set_config = drm_atomic_helper_set_config,
+	.page_flip = drm_atomic_helper_page_flip,
+	.atomic_duplicate_state = amdgpu_dm_crtc_duplicate_state,
+	.atomic_destroy_state = amdgpu_dm_crtc_destroy_state,
+	.set_crc_source = amdgpu_dm_crtc_set_crc_source,
+	.verify_crc_source = amdgpu_dm_crtc_verify_crc_source,
+	.get_crc_sources = amdgpu_dm_crtc_get_crc_sources,
+	.get_vblank_counter = amdgpu_get_vblank_counter_kms,
+	.enable_vblank = amdgpu_dm_crtc_deferred_enable_vblank,
+	.disable_vblank = amdgpu_dm_crtc_deferred_disable_vblank,
+	.get_vblank_timestamp = drm_crtc_vblank_helper_get_vblank_timestamp,
+#if defined(CONFIG_DEBUG_FS)
+	.late_register = amdgpu_dm_crtc_late_register,
+#endif
+#ifdef AMD_PRIVATE_COLOR
+	.atomic_set_property = amdgpu_dm_atomic_crtc_set_property,
+	.atomic_get_property = amdgpu_dm_atomic_crtc_get_property,
+#endif
+	.pre_enable_vblank = amdgpu_dm_crtc_pre_enable_vblank,
+	.post_enable_vblank = amdgpu_dm_crtc_post_enable_vblank,
+	.pre_disable_vblank = amdgpu_dm_crtc_pre_disable_vblank,
+	.post_disable_vblank = amdgpu_dm_crtc_post_disable_vblank,
+};
+
 static void amdgpu_dm_crtc_helper_disable(struct drm_crtc *crtc)
 {
 }
@@ -770,6 +877,7 @@ int amdgpu_dm_crtc_init(struct amdgpu_display_manager *dm,
 			       struct drm_plane *plane,
 			       uint32_t crtc_index)
 {
+	const struct drm_crtc_funcs *crtc_funcs;
 	struct amdgpu_crtc *acrtc = NULL;
 	struct drm_plane *cursor_plane;
 	bool has_degamma;
@@ -786,12 +894,25 @@ int amdgpu_dm_crtc_init(struct amdgpu_display_manager *dm,
 	if (!acrtc)
 		goto fail;
 
+	/*
+	 * Only enable deferred vblank enable/disable for ASICs with IPS
+	 * support
+	 */
+	if (dm->dc->caps.ips_support) {
+		crtc_funcs = &amdgpu_dm_crtc_deferred_vblank_funcs;
+		drm_dbg_driver(dm->ddev,
+			       "Initializing CRTC %d with deferred vBlank enable/disable\n",
+			       crtc_index);
+	} else {
+		crtc_funcs = &amdgpu_dm_crtc_funcs;
+	}
+
 	res = drm_crtc_init_with_planes(
 			dm->ddev,
 			&acrtc->base,
 			plane,
 			cursor_plane,
-			&amdgpu_dm_crtc_funcs, NULL);
+			crtc_funcs, NULL);
 
 	if (res)
 		goto fail;
