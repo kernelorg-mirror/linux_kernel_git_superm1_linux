@@ -28,6 +28,13 @@
 #include "irq_types.h" /* DAL irq definitions */
 
 /*
+ * Get OTG vline irq id from vline num and otg num. See also
+ * amdgpu_dm_set_vline_irq_state()
+ */
+#define DM_VLINE_IRQ(adev, vline_num, otg_num) \
+	(adev->mode_info.num_crtc * vline_num + otg_num)
+
+/*
  * Display Manager IRQ-related interfaces (for use by DAL).
  */
 

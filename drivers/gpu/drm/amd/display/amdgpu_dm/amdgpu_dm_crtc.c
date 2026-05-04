@@ -28,6 +28,7 @@
 
 #include "dc.h"
 #include "amdgpu.h"
+#include "amdgpu_dm_irq.h"
 #include "amdgpu_dm_psr.h"
 #include "amdgpu_dm_replay.h"
 #include "amdgpu_dm_crtc.h"
@@ -316,10 +317,19 @@ static inline int amdgpu_dm_crtc_set_vblank(struct drm_crtc *crtc, bool enable)
 
 	/* crtc vblank or vstartup interrupt */
 	if (enable) {
-		rc = amdgpu_irq_get(adev, &adev->crtc_irq, irq_type);
+		/* vline only available on DCN+ */
+		if (amdgpu_ip_version(adev, DCE_HWIP, 0) == 0)
+			rc = amdgpu_irq_get(adev, &adev->crtc_irq, irq_type);
+		else
+			rc = amdgpu_irq_get(adev, &adev->vline_irq,
+					    DM_VLINE_IRQ(adev, 2, acrtc->crtc_id));
 		drm_dbg_vbl(crtc->dev, "Get crtc_irq ret=%d\n", rc);
 	} else {
-		rc = amdgpu_irq_put(adev, &adev->crtc_irq, irq_type);
+		if (amdgpu_ip_version(adev, DCE_HWIP, 0) == 0)
+			rc = amdgpu_irq_put(adev, &adev->crtc_irq, irq_type);
+		else
+			rc = amdgpu_irq_put(adev, &adev->vline_irq,
+					    DM_VLINE_IRQ(adev, 2, acrtc->crtc_id));
 		drm_dbg_vbl(crtc->dev, "Put crtc_irq ret=%d\n", rc);
 	}
 
@@ -349,10 +359,12 @@ static inline int amdgpu_dm_crtc_set_vblank(struct drm_crtc *crtc, bool enable)
 	/* crtc vline0 interrupt, only available on DCN+ */
 	if (amdgpu_ip_version(adev, DCE_HWIP, 0) != 0) {
 		if (enable) {
-			rc = amdgpu_irq_get(adev, &adev->vline0_irq, irq_type);
+			rc = amdgpu_irq_get(adev, &adev->vline_irq,
+					    DM_VLINE_IRQ(adev, 0, acrtc->crtc_id));
 			drm_dbg_vbl(crtc->dev, "Get vline0_irq ret=%d\n", rc);
 		} else {
-			rc = amdgpu_irq_put(adev, &adev->vline0_irq, irq_type);
+			rc = amdgpu_irq_put(adev, &adev->vline_irq,
+					    DM_VLINE_IRQ(adev, 0, acrtc->crtc_id));
 			drm_dbg_vbl(crtc->dev, "Put vline0_irq ret=%d\n", rc);
 		}
 

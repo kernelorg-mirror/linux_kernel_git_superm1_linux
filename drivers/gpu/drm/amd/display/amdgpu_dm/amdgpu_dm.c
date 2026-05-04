@@ -658,7 +658,8 @@ static void dm_vupdate_high_irq(void *interrupt_params)
  * Handles the CRTC/VSYNC interrupt by notfying DRM's VBLANK
  * event handler.
  */
-static void dm_crtc_high_irq(void *interrupt_params)
+static void __dm_crtc_high_irq(void *interrupt_params,
+			     int otg_inst)
 {
 	struct common_irq_params *irq_params = interrupt_params;
 	struct amdgpu_device *adev = irq_params->adev;
@@ -667,7 +668,7 @@ static void dm_crtc_high_irq(void *interrupt_params)
 	unsigned long flags;
 	int vrr_active;
 
-	acrtc = get_crtc_by_otg_inst(adev, irq_params->irq_src - IRQ_TYPE_VBLANK);
+	acrtc = get_crtc_by_otg_inst(adev, otg_inst);
 	if (!acrtc)
 		return;
 
@@ -767,6 +768,14 @@ static void dm_crtc_high_irq(void *interrupt_params)
 	spin_unlock_irqrestore(&adev_to_drm(adev)->event_lock, flags);
 }
 
+static void dm_crtc_high_irq(void *interrupt_params)
+{
+	struct common_irq_params *irq_params = interrupt_params;
+
+	__dm_crtc_high_irq(interrupt_params,
+			   irq_params->irq_src - DC_IRQ_SOURCE_VBLANK1);
+}
+
 #if defined(CONFIG_DRM_AMD_SECURE_DISPLAY)
 /**
  * dm_dcn_vertical_interrupt0_high_irq() - Handles OTG Vertical interrupt0 for
@@ -789,6 +798,18 @@ static void dm_dcn_vertical_interrupt0_high_irq(void *interrupt_params)
 	amdgpu_dm_crtc_handle_crc_window_irq(&acrtc->base);
 }
 #endif /* CONFIG_DRM_AMD_SECURE_DISPLAY */
+
+
+/**
+ * Same as dm_crtc_high_irq, but driven by the vline2 interrupt instead.
+ */
+static void dm_dcn_vertical_interrupt2_high_irq(void *interrupt_params)
+{
+	struct common_irq_params *irq_params = interrupt_params;
+
+	__dm_crtc_high_irq(interrupt_params,
+			   irq_params->irq_src - DC_IRQ_SOURCE_DC1_VLINE2);
+}
 
 /**
  * dmub_aux_setconfig_callback - Callback for AUX or SET_CONFIG command.
@@ -4694,15 +4715,13 @@ static int dce110_register_irq_handlers(struct amdgpu_device *adev)
 	return r;
 }
 
-/* Register IRQ sources and initialize IRQ callbacks */
-static int dcn10_register_irq_handlers(struct amdgpu_device *adev)
+
+static int dcn10_register_vline_irq_handlers(struct amdgpu_device *adev)
 {
 	struct dc *dc = adev->dm.dc;
 	struct common_irq_params *c_irq_params;
 	struct dc_interrupt_params int_params = {0};
-	int r;
-	int i;
-#if defined(CONFIG_DRM_AMD_SECURE_DISPLAY)
+	int r, i;
 	static const unsigned int vrtl_int_srcid[] = {
 		DCN_1_0__SRCID__OTG1_VERTICAL_INTERRUPT0_CONTROL,
 		DCN_1_0__SRCID__OTG2_VERTICAL_INTERRUPT0_CONTROL,
@@ -4711,7 +4730,105 @@ static int dcn10_register_irq_handlers(struct amdgpu_device *adev)
 		DCN_1_0__SRCID__OTG5_VERTICAL_INTERRUPT0_CONTROL,
 		DCN_1_0__SRCID__OTG6_VERTICAL_INTERRUPT0_CONTROL
 	};
+#if defined(CONFIG_DRM_AMD_SECURE_DISPLAY)
+	static const unsigned int vrtl0_int_ctxid[] = {
+		DCN_1_0__CTXID__OTG1_VERTICAL_INTERRUPT0_CONTROL,
+		DCN_1_0__CTXID__OTG2_VERTICAL_INTERRUPT0_CONTROL,
+		DCN_1_0__CTXID__OTG3_VERTICAL_INTERRUPT0_CONTROL,
+		DCN_1_0__CTXID__OTG4_VERTICAL_INTERRUPT0_CONTROL,
+		DCN_1_0__CTXID__OTG5_VERTICAL_INTERRUPT0_CONTROL,
+		DCN_1_0__CTXID__OTG6_VERTICAL_INTERRUPT0_CONTROL
+	};
 #endif
+	static const unsigned int vrtl2_int_ctxid[] = {
+		DCN_1_0__CTXID__OTG1_VERTICAL_INTERRUPT2_CONTROL,
+		DCN_1_0__CTXID__OTG2_VERTICAL_INTERRUPT2_CONTROL,
+		DCN_1_0__CTXID__OTG3_VERTICAL_INTERRUPT2_CONTROL,
+		DCN_1_0__CTXID__OTG4_VERTICAL_INTERRUPT2_CONTROL,
+		DCN_1_0__CTXID__OTG5_VERTICAL_INTERRUPT2_CONTROL,
+		DCN_1_0__CTXID__OTG6_VERTICAL_INTERRUPT2_CONTROL
+	};
+
+	int_params.requested_polarity = INTERRUPT_POLARITY_DEFAULT;
+	int_params.current_polarity = INTERRUPT_POLARITY_DEFAULT;
+
+	for (i = 0; i <= adev->mode_info.num_crtc - 1; i++) {
+		r = amdgpu_irq_add_id(adev, SOC15_IH_CLIENTID_DCE,
+				vrtl_int_srcid[i], &adev->vline_irq);
+
+		if (r) {
+			drm_err(adev_to_drm(adev),
+				"Failed to add vline0/1/2 irq id!\n");
+			return r;
+		}
+
+#if defined(CONFIG_DRM_AMD_SECURE_DISPLAY)
+		/* Register vline0 */
+		int_params.int_context = INTERRUPT_HIGH_IRQ_CONTEXT;
+		int_params.irq_source =
+			dc_interrupt_to_irq_source(dc,
+						   vrtl_int_srcid[i],
+						   vrtl0_int_ctxid[i]);
+
+		if (int_params.irq_source == DC_IRQ_SOURCE_INVALID ||
+			int_params.irq_source < DC_IRQ_SOURCE_DC1_VLINE0 ||
+			int_params.irq_source > DC_IRQ_SOURCE_DC6_VLINE0) {
+			drm_err(adev_to_drm(adev),
+				"Failed to register vline0 irq!\n");
+			return -EINVAL;
+		}
+
+		c_irq_params = &adev->dm.vline0_params[int_params.irq_source
+					- DC_IRQ_SOURCE_DC1_VLINE0];
+
+		c_irq_params->adev = adev;
+		c_irq_params->irq_src = int_params.irq_source;
+
+		if (!amdgpu_dm_irq_register_interrupt(adev, &int_params,
+			dm_dcn_vertical_interrupt0_high_irq,
+			c_irq_params))
+			return -ENOMEM;
+#endif
+		/*
+		 * vline2 shares the same srcids as vline0, but different ctxid.
+		 */
+		int_params.int_context = INTERRUPT_HIGH_IRQ_CONTEXT;
+		int_params.irq_source =
+			dc_interrupt_to_irq_source(dc,
+						   vrtl_int_srcid[i],
+						   vrtl2_int_ctxid[i]);
+
+		if (int_params.irq_source == DC_IRQ_SOURCE_INVALID ||
+			int_params.irq_source < DC_IRQ_SOURCE_DC1_VLINE2 ||
+			int_params.irq_source > DC_IRQ_SOURCE_DC6_VLINE2) {
+			drm_err(adev_to_drm(adev),
+				"Failed to register vline2 irq!\n");
+			return -EINVAL;
+		}
+
+		c_irq_params = &adev->dm.vline2_params[int_params.irq_source
+					- DC_IRQ_SOURCE_DC1_VLINE2];
+
+		c_irq_params->adev = adev;
+		c_irq_params->irq_src = int_params.irq_source;
+
+		if (!amdgpu_dm_irq_register_interrupt(adev, &int_params,
+			dm_dcn_vertical_interrupt2_high_irq,
+			c_irq_params))
+			return -ENOMEM;
+	}
+
+	return 0;
+}
+
+/* Register IRQ sources and initialize IRQ callbacks */
+static int dcn10_register_irq_handlers(struct amdgpu_device *adev)
+{
+	struct dc *dc = adev->dm.dc;
+	struct common_irq_params *c_irq_params;
+	struct dc_interrupt_params int_params = {0};
+	int r;
+	int i;
 
 	int_params.requested_polarity = INTERRUPT_POLARITY_DEFAULT;
 	int_params.current_polarity = INTERRUPT_POLARITY_DEFAULT;
@@ -4728,72 +4845,12 @@ static int dcn10_register_irq_handlers(struct amdgpu_device *adev)
 	 *    for acknowledging and handling.
 	 */
 
-	/* Use VSTARTUP interrupt */
-	for (i = DCN_1_0__SRCID__DC_D1_OTG_VSTARTUP;
-			i <= DCN_1_0__SRCID__DC_D1_OTG_VSTARTUP + adev->mode_info.num_crtc - 1;
-			i++) {
-		r = amdgpu_irq_add_id(adev, SOC15_IH_CLIENTID_DCE, i, &adev->crtc_irq);
-
-		if (r) {
-			drm_err(adev_to_drm(adev), "Failed to add crtc irq id!\n");
-			return r;
-		}
-
-		int_params.int_context = INTERRUPT_HIGH_IRQ_CONTEXT;
-		int_params.irq_source =
-			dc_interrupt_to_irq_source(dc, i, 0);
-
-		if (int_params.irq_source == DC_IRQ_SOURCE_INVALID ||
-			int_params.irq_source  < DC_IRQ_SOURCE_VBLANK1 ||
-			int_params.irq_source  > DC_IRQ_SOURCE_VBLANK6) {
-			drm_err(adev_to_drm(adev), "Failed to register vblank irq!\n");
-			return -EINVAL;
-		}
-
-		c_irq_params = &adev->dm.vblank_params[int_params.irq_source - DC_IRQ_SOURCE_VBLANK1];
-
-		c_irq_params->adev = adev;
-		c_irq_params->irq_src = int_params.irq_source;
-
-		if (!amdgpu_dm_irq_register_interrupt(adev, &int_params,
-			dm_crtc_high_irq, c_irq_params))
-			return -ENOMEM;
+	r = dcn10_register_vline_irq_handlers(adev);
+	if (r) {
+		drm_err(adev_to_drm(adev),
+			"Failed to register vline interrupts\n");
+		return r;
 	}
-
-	/* Use otg vertical line interrupt */
-#if defined(CONFIG_DRM_AMD_SECURE_DISPLAY)
-	for (i = 0; i <= adev->mode_info.num_crtc - 1; i++) {
-		r = amdgpu_irq_add_id(adev, SOC15_IH_CLIENTID_DCE,
-				vrtl_int_srcid[i], &adev->vline0_irq);
-
-		if (r) {
-			drm_err(adev_to_drm(adev), "Failed to add vline0 irq id!\n");
-			return r;
-		}
-
-		int_params.int_context = INTERRUPT_HIGH_IRQ_CONTEXT;
-		int_params.irq_source =
-			dc_interrupt_to_irq_source(dc, vrtl_int_srcid[i], 0);
-
-		if (int_params.irq_source == DC_IRQ_SOURCE_INVALID ||
-			int_params.irq_source < DC_IRQ_SOURCE_DC1_VLINE0 ||
-			int_params.irq_source > DC_IRQ_SOURCE_DC6_VLINE0) {
-			drm_err(adev_to_drm(adev), "Failed to register vline0 irq!\n");
-			return -EINVAL;
-		}
-
-		c_irq_params = &adev->dm.vline0_params[int_params.irq_source
-					- DC_IRQ_SOURCE_DC1_VLINE0];
-
-		c_irq_params->adev = adev;
-		c_irq_params->irq_src = int_params.irq_source;
-
-		if (!amdgpu_dm_irq_register_interrupt(adev, &int_params,
-			dm_dcn_vertical_interrupt0_high_irq,
-			c_irq_params))
-			return -ENOMEM;
-	}
-#endif
 
 	/* Use VUPDATE_NO_LOCK interrupt on DCN, which seems to correspond to
 	 * the regular VUPDATE interrupt on DCE. We want DC_IRQ_SOURCE_VUPDATEx
@@ -9449,7 +9506,8 @@ static void manage_dm_interrupts(struct amdgpu_device *adev,
 			if (amdgpu_irq_get(adev, &adev->pageflip_irq, irq_type))
 				drm_err(dev, "DM_IRQ: Cannot get pageflip irq!\n");
 #if defined(CONFIG_DRM_AMD_SECURE_DISPLAY)
-			if (amdgpu_irq_get(adev, &adev->vline0_irq, irq_type))
+			if (amdgpu_irq_get(adev, &adev->vline_irq,
+					   DM_VLINE_IRQ(adev, 0, irq_type)))
 				drm_err(dev, "DM_IRQ: Cannot get vline0 irq!\n");
 #endif
 		}
@@ -9462,7 +9520,8 @@ static void manage_dm_interrupts(struct amdgpu_device *adev,
 		case IP_VERSION(3, 0, 3):
 		case IP_VERSION(3, 2, 0):
 #if defined(CONFIG_DRM_AMD_SECURE_DISPLAY)
-			if (amdgpu_irq_put(adev, &adev->vline0_irq, irq_type))
+			if (amdgpu_irq_put(adev, &adev->vline_irq,
+					   DM_VLINE_IRQ(adev, 0, irq_type)))
 				drm_err(dev, "DM_IRQ: Cannot put vline0 irq!\n");
 #endif
 			if (amdgpu_irq_put(adev, &adev->pageflip_irq, irq_type))

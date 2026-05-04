@@ -30,6 +30,24 @@
 
 #include "irq_types.h"
 
+/*
+ * Helper to get vertical interrupt src/ctx id by OTG instance and vint number
+ */
+#define DCN_VINT_SRCID(otg_inst, vint_num) \
+	DCN_1_0__SRCID__OTG ## otg_inst ## _VERTICAL_INTERRUPT ## vint_num ## _CONTROL
+#define DCN_VINT_CTXID(otg_inst, vint_num) \
+	DCN_1_0__CTXID__OTG ## otg_inst ## _VERTICAL_INTERRUPT ## vint_num ## _CONTROL
+#define DC_VINT_IRQSRC(otg_inst, vint_num) \
+	DC_IRQ_SOURCE_DC ## otg_inst ## _VLINE ## vint_num
+
+/* Helper to map vertical interrupt src/ctx id to DC irq source enum */
+#define DCN_VINT_TO_DC_IRQSRC(otg_inst, ext_id) ( \
+	(ext_id) == DCN_VINT_CTXID(otg_inst, 0) ? DC_VINT_IRQSRC(otg_inst, 0) : \
+	(ext_id) == DCN_VINT_CTXID(otg_inst, 1) ? DC_VINT_IRQSRC(otg_inst, 1) : \
+	(ext_id) == DCN_VINT_CTXID(otg_inst, 2) ? DC_VINT_IRQSRC(otg_inst, 2) : \
+	DC_IRQ_SOURCE_INVALID \
+)
+
 struct irq_service;
 struct irq_source_info;
 

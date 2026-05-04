@@ -768,18 +768,90 @@ static int amdgpu_dm_set_crtc_irq_state(struct amdgpu_device *adev,
 		__func__);
 }
 
-static int amdgpu_dm_set_vline0_irq_state(struct amdgpu_device *adev,
-					struct amdgpu_irq_src *source,
-					unsigned int crtc_id,
-					enum amdgpu_interrupt_state state)
+/**
+ * amdgpu_dm_set_vline_irq_state: Set interrupt state for vline
+ *
+ * Map base driver amdgpu_irq_update() -- called per interrupt src ID -- to
+ * their corresponding dc_irq_source, then set then to the requested state.
+ *
+ * Since all the vline0/1/2 interrupts have the same src_id, the standard
+ * amdgpu_irq_src.num_types mapping to the number of OTGs won't work. For vline,
+ * num_types will have to cover (number of different vline interrupt types) *
+ * (number of OTGs) types. For example, if there are 6 OTGS, then num_types =
+ * 3*6 = 18.
+ *
+ * This is only needed for the amdgpu_irq_src_funcs.set_irq implementation; the
+ * .process implementation is provided the interrupt vector, which contains both
+ * the src_id and ctx_id to uniquely map to the dc_irq_source.
+ *
+ * The vline_otg_id mapping is first by vline num, then by crtc id:
+ *
+ * | vline_crtc_id | vline num | CRTC id |
+ * |---------------|-----------|---------|
+ * | 0             | 0         | 0       |
+ * | 1             | 0         | 1       |
+ * | ...           | ...       | ...     |
+ * | 5             | 0         | 5       |
+ * | 6             | 1         | 0       |
+ * | ...           | ...       | ...     |
+ * | 11            | 1         | 5       |
+ * | 12            | 2         | 0       |
+ * | ...           | ...       | ...     |
+ * | 17            | 2         | 5       |
+ */
+static int amdgpu_dm_set_vline_irq_state(struct amdgpu_device *adev,
+					 struct amdgpu_irq_src *source,
+					 unsigned int vline_crtc_id,
+					 enum amdgpu_interrupt_state state)
 {
-	return dm_irq_state(
-		adev,
-		source,
-		crtc_id,
-		state,
-		IRQ_TYPE_VLINE0,
-		__func__);
+	bool st;
+	unsigned int vline_num, crtc_id;
+	enum dc_irq_source irq_source;
+	struct dc *dc = adev->dm.dc;
+	struct amdgpu_crtc *acrtc;
+
+	if (vline_crtc_id >= 3 * adev->mode_info.num_crtc) {
+		drm_err(adev_to_drm(adev),
+			"Invalid vline map_id :%d\n", vline_crtc_id);
+		return -EINVAL;
+	}
+
+	vline_num = vline_crtc_id / adev->mode_info.num_crtc;
+	crtc_id = vline_crtc_id % adev->mode_info.num_crtc;
+	acrtc = adev->mode_info.crtcs[crtc_id];
+
+	if (!acrtc) {
+		drm_err(adev_to_drm(adev),
+			"crtc is NULL at id : %d\n", crtc_id);
+		return 0;
+	}
+
+	/*
+	 * DRM CRTC index and DCN OTG instance may not equal. Use otg_inst since
+	 * irq_source is defined by OTG instance.
+	 */
+	if (acrtc->otg_inst == -1)
+		return 0;
+
+	if (vline_num == 0)
+		irq_source = IRQ_TYPE_VLINE0 + acrtc->otg_inst;
+	else if (vline_num == 1)
+		irq_source = IRQ_TYPE_VLINE1 + acrtc->otg_inst;
+	else if (vline_num == 2)
+		irq_source = IRQ_TYPE_VLINE2 + acrtc->otg_inst;
+	else {
+		drm_err(adev_to_drm(adev),
+			"Invalid vline num :%d\n", vline_num);
+		return -EINVAL;
+	}
+
+	st = (state == AMDGPU_IRQ_STATE_ENABLE);
+
+	if (dc && dc->caps.ips_support && dc->idle_optimizations_allowed)
+		dc_allow_idle_optimizations(dc, false);
+
+	dc_interrupt_set(adev->dm.dc, irq_source, st);
+	return 0;
 }
 
 static int amdgpu_dm_set_dmub_outbox_irq_state(struct amdgpu_device *adev,
@@ -825,8 +897,8 @@ static const struct amdgpu_irq_src_funcs dm_crtc_irq_funcs = {
 	.process = amdgpu_dm_irq_handler,
 };
 
-static const struct amdgpu_irq_src_funcs dm_vline0_irq_funcs = {
-	.set = amdgpu_dm_set_vline0_irq_state,
+static const struct amdgpu_irq_src_funcs dm_vline_irq_funcs = {
+	.set = amdgpu_dm_set_vline_irq_state,
 	.process = amdgpu_dm_irq_handler,
 };
 
@@ -860,8 +932,9 @@ void amdgpu_dm_set_irq_funcs(struct amdgpu_device *adev)
 	adev->crtc_irq.num_types = adev->mode_info.num_crtc;
 	adev->crtc_irq.funcs = &dm_crtc_irq_funcs;
 
-	adev->vline0_irq.num_types = adev->mode_info.num_crtc;
-	adev->vline0_irq.funcs = &dm_vline0_irq_funcs;
+	/* Number of vline types * num OTGs */
+	adev->vline_irq.num_types = 3 * adev->mode_info.num_crtc;
+	adev->vline_irq.funcs = &dm_vline_irq_funcs;
 
 	adev->dmub_outbox_irq.num_types = 1;
 	adev->dmub_outbox_irq.funcs = &dm_dmub_outbox_irq_funcs;

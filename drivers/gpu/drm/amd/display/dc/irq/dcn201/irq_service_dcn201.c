@@ -47,10 +47,6 @@ static enum dc_irq_source to_dal_irq_source_dcn201(
 		return DC_IRQ_SOURCE_VBLANK1;
 	case DCN_1_0__SRCID__DC_D2_OTG_VSTARTUP:
 		return DC_IRQ_SOURCE_VBLANK2;
-	case DCN_1_0__SRCID__OTG1_VERTICAL_INTERRUPT0_CONTROL:
-		return DC_IRQ_SOURCE_DC1_VLINE0;
-	case DCN_1_0__SRCID__OTG2_VERTICAL_INTERRUPT0_CONTROL:
-		return DC_IRQ_SOURCE_DC2_VLINE0;
 	case DCN_1_0__SRCID__HUBP0_FLIP_INTERRUPT:
 		return DC_IRQ_SOURCE_PFLIP1;
 	case DCN_1_0__SRCID__HUBP1_FLIP_INTERRUPT:
@@ -59,6 +55,12 @@ static enum dc_irq_source to_dal_irq_source_dcn201(
 		return DC_IRQ_SOURCE_VUPDATE1;
 	case DCN_1_0__SRCID__OTG1_IHC_V_UPDATE_NO_LOCK_INTERRUPT:
 		return DC_IRQ_SOURCE_VUPDATE2;
+
+	case DCN_VINT_SRCID(1, 0):
+		return DCN_VINT_TO_DC_IRQSRC(1, ext_id);
+	case DCN_VINT_SRCID(2, 0):
+		return DCN_VINT_TO_DC_IRQSRC(2, ext_id);
+
 	case DCN_1_0__SRCID__DC_HPD1_INT:
 		/* generic src_id for all HPD and HPDRX interrupts */
 		switch (ext_id) {
@@ -101,6 +103,11 @@ static struct irq_source_info_funcs vblank_irq_info_funcs = {
 };
 
 static struct irq_source_info_funcs vline0_irq_info_funcs = {
+	.set = NULL,
+	.ack = NULL
+};
+
+static struct irq_source_info_funcs vline2_irq_info_funcs = {
 	.set = NULL,
 	.ack = NULL
 };
@@ -195,6 +202,13 @@ static struct irq_source_info_funcs vupdate_no_lock_irq_info_funcs = {
 		.funcs = &vline0_irq_info_funcs\
 	}
 
+#define vline2_int_entry(reg_num)\
+	[DC_IRQ_SOURCE_DC1_VLINE2 + reg_num] = {\
+		IRQ_REG_ENTRY(OTG, reg_num,\
+			OTG_VERTICAL_INTERRUPT2_CONTROL, OTG_VERTICAL_INTERRUPT2_INT_ENABLE,\
+			OTG_VERTICAL_INTERRUPT2_CONTROL, OTG_VERTICAL_INTERRUPT2_CLEAR),\
+		.funcs = &vline2_irq_info_funcs\
+	}
 #define dummy_irq_entry() \
 	{\
 		.funcs = &dummy_irq_info_funcs\
@@ -309,6 +323,8 @@ irq_source_info_dcn201[DAL_IRQ_SOURCES_NUMBER] = {
 	dummy_irq_entry(),
 	dummy_irq_entry(),
 	dummy_irq_entry(),
+	vline2_int_entry(0),
+	vline2_int_entry(1),
 };
 
 static const struct irq_service_funcs irq_service_funcs_dcn201 = {

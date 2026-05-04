@@ -56,18 +56,6 @@ static enum dc_irq_source to_dal_irq_source_dcn31(struct irq_service *irq_servic
 		return DC_IRQ_SOURCE_VBLANK5;
 	case DCN_1_0__SRCID__DC_D6_OTG_VSTARTUP:
 		return DC_IRQ_SOURCE_VBLANK6;
-	case DCN_1_0__SRCID__OTG1_VERTICAL_INTERRUPT0_CONTROL:
-		return DC_IRQ_SOURCE_DC1_VLINE0;
-	case DCN_1_0__SRCID__OTG2_VERTICAL_INTERRUPT0_CONTROL:
-		return DC_IRQ_SOURCE_DC2_VLINE0;
-	case DCN_1_0__SRCID__OTG3_VERTICAL_INTERRUPT0_CONTROL:
-		return DC_IRQ_SOURCE_DC3_VLINE0;
-	case DCN_1_0__SRCID__OTG4_VERTICAL_INTERRUPT0_CONTROL:
-		return DC_IRQ_SOURCE_DC4_VLINE0;
-	case DCN_1_0__SRCID__OTG5_VERTICAL_INTERRUPT0_CONTROL:
-		return DC_IRQ_SOURCE_DC5_VLINE0;
-	case DCN_1_0__SRCID__OTG6_VERTICAL_INTERRUPT0_CONTROL:
-		return DC_IRQ_SOURCE_DC6_VLINE0;
 	case DCN_1_0__SRCID__HUBP0_FLIP_INTERRUPT:
 		return DC_IRQ_SOURCE_PFLIP1;
 	case DCN_1_0__SRCID__HUBP1_FLIP_INTERRUPT:
@@ -94,6 +82,20 @@ static enum dc_irq_source to_dal_irq_source_dcn31(struct irq_service *irq_servic
 		return DC_IRQ_SOURCE_VUPDATE6;
 	case DCN_1_0__SRCID__DMCUB_OUTBOX_LOW_PRIORITY_READY_INT:
 		return DC_IRQ_SOURCE_DMCUB_OUTBOX;
+
+	case DCN_VINT_SRCID(1, 0):
+		return DCN_VINT_TO_DC_IRQSRC(1, ext_id);
+	case DCN_VINT_SRCID(2, 0):
+		return DCN_VINT_TO_DC_IRQSRC(2, ext_id);
+	case DCN_VINT_SRCID(3, 0):
+		return DCN_VINT_TO_DC_IRQSRC(3, ext_id);
+	case DCN_VINT_SRCID(4, 0):
+		return DCN_VINT_TO_DC_IRQSRC(4, ext_id);
+	case DCN_VINT_SRCID(5, 0):
+		return DCN_VINT_TO_DC_IRQSRC(5, ext_id);
+	case DCN_VINT_SRCID(6, 0):
+		return DCN_VINT_TO_DC_IRQSRC(6, ext_id);
+
 	case DCN_1_0__SRCID__DC_HPD1_INT:
 		/* generic src_id for all HPD and HPDRX interrupts */
 		switch (ext_id) {
@@ -162,6 +164,11 @@ static struct irq_source_info_funcs outbox_irq_info_funcs = {
 };
 
 static struct irq_source_info_funcs vline0_irq_info_funcs = {
+	.set = NULL,
+	.ack = NULL
+};
+
+static struct irq_source_info_funcs vline2_irq_info_funcs = {
 	.set = NULL,
 	.ack = NULL
 };
@@ -260,6 +267,15 @@ static struct irq_source_info_funcs vline0_irq_info_funcs = {
 			OTG_VERTICAL_INTERRUPT0_CONTROL, OTG_VERTICAL_INTERRUPT0_CLEAR),\
 		.funcs = &vline0_irq_info_funcs\
 	}
+
+#define vline2_int_entry(reg_num)\
+	[DC_IRQ_SOURCE_DC1_VLINE2 + reg_num] = {\
+		IRQ_REG_ENTRY(OTG, reg_num,\
+			OTG_VERTICAL_INTERRUPT2_CONTROL, OTG_VERTICAL_INTERRUPT2_INT_ENABLE,\
+			OTG_VERTICAL_INTERRUPT2_CONTROL, OTG_VERTICAL_INTERRUPT2_CLEAR),\
+		.funcs = &vline2_irq_info_funcs\
+	}
+
 #define dmub_outbox_int_entry()\
 	[DC_IRQ_SOURCE_DMCUB_OUTBOX] = {\
 		IRQ_REG_ENTRY_DMUB(\
@@ -376,6 +392,10 @@ irq_source_info_dcn31[DAL_IRQ_SOURCES_NUMBER] = {
 	vline0_int_entry(3),
 	[DC_IRQ_SOURCE_DC5_VLINE1] = dummy_irq_entry(),
 	[DC_IRQ_SOURCE_DC6_VLINE1] = dummy_irq_entry(),
+	vline2_int_entry(0),
+	vline2_int_entry(1),
+	vline2_int_entry(2),
+	vline2_int_entry(3),
 	dmub_outbox_int_entry(),
 };
 
