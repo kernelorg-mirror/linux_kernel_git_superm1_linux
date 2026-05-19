@@ -33,6 +33,14 @@ struct dm_irq_params {
 	u32 last_flip_vblank;
 	struct mod_vrr_params vrr_params;
 	struct dc_stream_state *stream;
+
+	/*
+	 * If not NULL, the plane for which a flip interrupt is expected. For
+	 * multi-plane configurations, this should be a plane that had it's fb
+	 * address updated. See also &prepare_flip_isr() and &clear_flip_isr()
+	 */
+	struct dc_plane_state *flip_target;
+
 	int active_planes;
 	bool allow_sr_entry;
 	struct mod_freesync_config freesync_config;

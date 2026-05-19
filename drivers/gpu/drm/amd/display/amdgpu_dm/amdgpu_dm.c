@@ -438,6 +438,23 @@ static inline bool update_planes_and_stream_adapter(struct dc *dc,
 }
 
 /**
+ * clear_flip_isr - clear armed flip after it's been handled
+ *
+ * See also prepare_flip_isr.
+ */
+static void clear_flip_isr(struct amdgpu_crtc *acrtc)
+{
+	assert_spin_locked(&acrtc->base.dev->event_lock);
+
+	WARN_ON(acrtc->pflip_status == AMDGPU_FLIP_NONE);
+	WARN_ON(acrtc->dm_irq_params.flip_target == NULL);
+
+	acrtc->pflip_status = AMDGPU_FLIP_NONE;
+	dc_plane_state_release(acrtc->dm_irq_params.flip_target);
+	acrtc->dm_irq_params.flip_target = NULL;
+}
+
+/**
  * dm_pflip_high_irq() - Handle pageflip interrupt
  * @interrupt_params: ignored
  *
@@ -533,7 +550,8 @@ static void dm_pflip_high_irq(void *interrupt_params)
 	amdgpu_crtc->dm_irq_params.last_flip_vblank =
 		amdgpu_get_vblank_counter_kms(&amdgpu_crtc->base);
 
-	amdgpu_crtc->pflip_status = AMDGPU_FLIP_NONE;
+	clear_flip_isr(amdgpu_crtc);
+
 	spin_unlock_irqrestore(&adev_to_drm(adev)->event_lock, flags);
 
 	drm_dbg_state(dev,
@@ -762,7 +780,37 @@ static void __dm_crtc_high_irq(void *interrupt_params,
 			acrtc->event = NULL;
 			drm_crtc_vblank_put(&acrtc->base);
 		}
-		acrtc->pflip_status = AMDGPU_FLIP_NONE;
+		clear_flip_isr(acrtc);
+	}
+
+	/*
+	 * If pflip irq failed to fire (possible if HW master update lock is
+	 * held, or HUBP was in DPG when flip was programmed), check if HUBP
+	 * consumed the fb addr. If so, send the event here.
+	 *
+	 * Not applicable to DCE HW with no pflip interrupts.
+	 */
+	if (amdgpu_ip_version(adev, DCE_HWIP, 0) != 0 &&
+	    acrtc->pflip_status == AMDGPU_FLIP_SUBMITTED) {
+		const struct dc_plane_status *status;
+		union dc_plane_status_update_flags flags = {0};
+
+		flags.bits.address = 1;
+		/*
+		 * Note that dc_plane_get_status() has a built-in IPS exit from
+		 * non-sleep context. That's ok though, since if interrupts are
+		 * active, then HW is not in IPS. Otherwise, this would have
+		 * been illegal.
+		 */
+		status = dc_plane_get_status(acrtc->dm_irq_params.flip_target,
+					     flags);
+
+		if (!status->is_flip_pending && acrtc->event) {
+			drm_crtc_send_vblank_event(&acrtc->base, acrtc->event);
+			acrtc->event = NULL;
+			drm_crtc_vblank_put(&acrtc->base);
+		}
+		clear_flip_isr(acrtc);
 	}
 
 	spin_unlock_irqrestore(&adev_to_drm(adev)->event_lock, flags);
@@ -9693,7 +9741,8 @@ static void remove_stream(struct amdgpu_device *adev,
 	acrtc->enabled = false;
 }
 
-static void prepare_flip_isr(struct amdgpu_crtc *acrtc)
+static void prepare_flip_isr(struct amdgpu_crtc *acrtc,
+			     struct dc_plane_state *flip_target)
 {
 
 	assert_spin_locked(&acrtc->base.dev->event_lock);
@@ -9706,6 +9755,9 @@ static void prepare_flip_isr(struct amdgpu_crtc *acrtc)
 
 	/* Mark this event as consumed */
 	acrtc->base.state->event = NULL;
+
+	dc_plane_state_retain(flip_target);
+	acrtc->dm_irq_params.flip_target = flip_target;
 
 	drm_dbg_state(acrtc->base.dev,
 		      "crtc:%d, pflip_stat:AMDGPU_FLIP_SUBMITTED\n",
@@ -10110,6 +10162,7 @@ static void amdgpu_dm_commit_planes(struct drm_atomic_state *state,
 	struct dm_crtc_state *acrtc_state = to_dm_crtc_state(new_pcrtc_state);
 	struct dm_crtc_state *dm_old_crtc_state =
 			to_dm_crtc_state(drm_atomic_get_old_crtc_state(state, pcrtc));
+	struct dc_plane_state *flip_target = NULL;
 	int planes_count = 0;
 	unsigned long flags;
 	bool vrr_active = amdgpu_dm_crtc_vrr_active(acrtc_state);
@@ -10215,6 +10268,8 @@ static void amdgpu_dm_commit_planes(struct drm_atomic_state *state,
 			planes_count += 1;
 			continue;
 		}
+
+		flip_target = dc_plane;
 
 		fill_dc_plane_info_and_addr(
 			dm->adev, new_plane_state,
@@ -10332,7 +10387,7 @@ static void amdgpu_dm_commit_planes(struct drm_atomic_state *state,
 			spin_lock_irqsave(&pcrtc->dev->event_lock, flags);
 
 			WARN_ON(acrtc_attach->pflip_status != AMDGPU_FLIP_NONE);
-			prepare_flip_isr(acrtc_attach);
+			prepare_flip_isr(acrtc_attach, flip_target);
 
 			spin_unlock_irqrestore(&pcrtc->dev->event_lock, flags);
 		}
