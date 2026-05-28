@@ -50,6 +50,13 @@ struct drm_backlight {
 	struct backlight_device *link;
 	struct work_struct work;
 	unsigned int set_value;
+	/*
+	 * Number of luminance-aware DRM clients that have taken over this
+	 * connector's backlight. While > 0, legacy sysfs writes to the
+	 * linked backlight_device return -EBUSY. Protected by
+	 * drm_backlight_lock.
+	 */
+	unsigned int luminance_clients;
 	bool changed : 1;
 };
 
@@ -123,11 +130,30 @@ static void __drm_backlight_prop_changed(struct drm_backlight *b, unsigned int v
 /* caller must hold @drm_backlight_lock */
 static void __drm_backlight_real_changed(struct drm_backlight *b, uint64_t v)
 {
+	struct drm_connector *connector = b->connector;
+	unsigned int max, set;
+
 	lockdep_assert_held(&drm_backlight_lock);
 
-	/* Atomic state update of the luminance property is wired up by a
-	 * follow-up patch that introduces the connector_state field.
+	if (!b->link)
+		return;
+
+	max = b->link->props.max_brightness;
+	if (max < 1)
+		return;
+
+	set = v;
+	if (set >= max)
+		set = max;
+
+	/* Update the atomic state directly.
+	 * For atomic drivers, the luminance value is stored in
+	 * connector->state->luminance, not in the legacy property array.
+	 * We update it unconditionally to reflect the hardware state,
+	 * regardless of DPMS.
 	 */
+	if (connector->state)
+		connector->state->luminance = set;
 }
 
 /**
@@ -166,6 +192,16 @@ static void __drm_backlight_link(struct drm_backlight *b,
 {
 	if (bd == b->link)
 		return;
+
+	/* Transfer any DRM legacy-sysfs takeover from the old link to the
+	 * new one so the inhibit follows the active backlight_device.
+	 */
+	if (b->luminance_clients) {
+		if (b->link)
+			atomic_sub(b->luminance_clients, &b->link->drm_takeover);
+		if (bd)
+			atomic_add(b->luminance_clients, &bd->drm_takeover);
+	}
 
 	backlight_device_unref(b->link);
 	b->link = bd;
@@ -222,6 +258,7 @@ void drm_backlight_free(struct drm_connector *connector)
 
 	WARN_ON(__drm_backlight_is_registered(b));
 	WARN_ON(b->link);
+	WARN_ON(b->luminance_clients);
 
 	kfree(b);
 	connector->backlight = NULL;

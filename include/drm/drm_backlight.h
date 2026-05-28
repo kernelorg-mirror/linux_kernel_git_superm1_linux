@@ -30,6 +30,7 @@
 struct backlight_device;
 struct drm_backlight;
 struct drm_connector;
+struct drm_device;
 struct drm_mode_object;
 
 int drm_backlight_init(void);
@@ -42,5 +43,9 @@ void drm_backlight_unregister(struct drm_backlight *b);
 
 void drm_backlight_link(struct drm_backlight *b, struct backlight_device *bd);
 struct backlight_device *drm_backlight_get_device(struct drm_backlight *b);
+void drm_backlight_inhibit_legacy(struct drm_backlight *b);
+void drm_backlight_uninhibit_legacy(struct drm_backlight *b);
+void drm_backlight_inhibit_legacy_all(struct drm_device *dev);
+void drm_backlight_uninhibit_legacy_all(struct drm_device *dev);
 void drm_backlight_set_luminance(struct drm_backlight *b, unsigned int value);
 #endif /* __DRM_BACKLIGHT_H__ */
