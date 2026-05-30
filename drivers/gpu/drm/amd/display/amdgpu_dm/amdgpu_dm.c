@@ -5371,19 +5371,19 @@ static void amdgpu_dm_backlight_set_level(struct amdgpu_display_manager *dm,
 	if (caps->brightness_mask)
 		brightness |= caps->brightness_mask;
 
-	/* Change brightness based on AUX property */
-	mutex_lock(&dm->dc_lock);
-	if (dm->dc->caps.ips_support && dm->dc->ctx->dmub_srv->idle_allowed) {
-		dc_allow_idle_optimizations(dm->dc, false);
-		reallow_idle = true;
-	}
-
 	if (trace_amdgpu_dm_brightness_enabled()) {
 		trace_amdgpu_dm_brightness(__builtin_return_address(0),
 					   user_brightness,
 					   brightness,
 					   caps->aux_support,
 					   power_supply_is_system_supplied() > 0);
+	}
+
+	/* Change brightness based on AUX property */
+	mutex_lock(&dm->dc_lock);
+	if (dm->dc->caps.ips_support && dm->dc->ctx->dmub_srv->idle_allowed) {
+		dc_allow_idle_optimizations(dm->dc, false);
+		reallow_idle = true;
 	}
 
 	if (caps->aux_support) {
