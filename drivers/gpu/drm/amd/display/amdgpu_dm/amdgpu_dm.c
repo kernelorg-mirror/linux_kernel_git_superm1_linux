@@ -3732,12 +3732,6 @@ static int dm_resume(struct amdgpu_ip_block *ip_block)
 
 		mutex_unlock(&dm->dc_lock);
 
-		/* set the backlight after a reset */
-		for (i = 0; i < dm->num_of_edps; i++) {
-			if (dm->backlight_dev[i])
-				amdgpu_dm_backlight_set_level(dm, i, dm->brightness[i]);
-		}
-
 		return 0;
 	}
 	/* Recreate dc_state - DC invalidates it when setting power state to S3. */
@@ -5350,10 +5344,8 @@ static void amdgpu_dm_backlight_set_level(struct amdgpu_display_manager *dm,
 		if (aconnector->bl_idx != bl_idx)
 			continue;
 
-		/* if connector is off, save the brightness for next time it's on */
+		/* if connector is off, DRM core will restore it next time it's on */
 		if (!aconnector->base.encoder) {
-			dm->brightness[bl_idx] = user_brightness;
-			dm->actual_brightness[bl_idx] = 0;
 			return;
 		}
 	}
@@ -5361,11 +5353,10 @@ static void amdgpu_dm_backlight_set_level(struct amdgpu_display_manager *dm,
 	amdgpu_dm_update_backlight_caps(dm, bl_idx);
 	caps = &dm->backlight_caps[bl_idx];
 
-	dm->brightness[bl_idx] = user_brightness;
 	/* update scratch register */
 	if (bl_idx == 0)
-		amdgpu_atombios_scratch_regs_set_backlight_level(dm->adev, dm->brightness[bl_idx]);
-	brightness = convert_brightness_from_user(caps, dm->brightness[bl_idx]);
+		amdgpu_atombios_scratch_regs_set_backlight_level(dm->adev, user_brightness);
+	brightness = convert_brightness_from_user(caps, user_brightness);
 	link = (struct dc_link *)dm->backlight_link[bl_idx];
 
 	/* Apply brightness quirk */
@@ -5407,9 +5398,6 @@ static void amdgpu_dm_backlight_set_level(struct amdgpu_display_manager *dm,
 		dc_allow_idle_optimizations(dm->dc, true);
 
 	mutex_unlock(&dm->dc_lock);
-
-	if (rc)
-		dm->actual_brightness[bl_idx] = user_brightness;
 }
 
 static int amdgpu_dm_backlight_update_status(struct backlight_device *bd)
@@ -5457,7 +5445,7 @@ static int amdgpu_dm_backlight_get_level(struct amdgpu_display_manager *dm,
 static int amdgpu_dm_backlight_get_brightness(struct backlight_device *bd)
 {
 	struct amdgpu_display_manager *dm = bl_get_data(bd);
-	int i, ret;
+	int i;
 
 	for (i = 0; i < dm->num_of_edps; i++) {
 		if (bd == dm->backlight_dev[i])
@@ -5466,11 +5454,7 @@ static int amdgpu_dm_backlight_get_brightness(struct backlight_device *bd)
 	if (i >= AMDGPU_DM_MAX_NUM_EDP)
 		i = 0;
 
-	ret = amdgpu_dm_backlight_get_level(dm, i);
-	if (ret < 0)
-		return dm->brightness[i];
-
-	return ret;
+	return amdgpu_dm_backlight_get_level(dm, i);
 }
 
 static const struct backlight_ops amdgpu_dm_backlight_ops = {
@@ -5488,8 +5472,6 @@ amdgpu_dm_register_backlight_device(struct amdgpu_dm_connector *aconnector)
 	struct amdgpu_dm_backlight_caps *caps;
 	char bl_name[16];
 	int min, max;
-	int real_brightness;
-	int init_brightness;
 	int r;
 
 	if (aconnector->bl_idx == -1)
@@ -5515,8 +5497,6 @@ amdgpu_dm_register_backlight_device(struct amdgpu_dm_connector *aconnector)
 	} else
 		props.brightness = props.max_brightness = MAX_BACKLIGHT_LEVEL;
 
-	init_brightness = props.brightness;
-
 	if (caps->data_points && !(amdgpu_dc_debug_mask & DC_DISABLE_CUSTOM_BRIGHTNESS_CURVE)) {
 		drm_info(drm, "Using custom brightness curve\n");
 		props.scale = BACKLIGHT_SCALE_NON_LINEAR;
@@ -5530,25 +5510,12 @@ amdgpu_dm_register_backlight_device(struct amdgpu_dm_connector *aconnector)
 	dm->backlight_dev[aconnector->bl_idx] =
 		backlight_device_register(bl_name, aconnector->base.kdev, dm,
 					  &amdgpu_dm_backlight_ops, &props);
-	dm->brightness[aconnector->bl_idx] = props.brightness;
 
 	if (IS_ERR(dm->backlight_dev[aconnector->bl_idx])) {
 		r = PTR_ERR(dm->backlight_dev[aconnector->bl_idx]);
 		drm_err(drm, "DM: Backlight registration failed: %d\n", r);
 		dm->backlight_dev[aconnector->bl_idx] = NULL;
 		return r;
-	}
-
-	/*
-	 * dm->brightness[x] can be inconsistent just after startup until
-	 * ops.get_brightness is called.
-	 */
-	real_brightness =
-		amdgpu_dm_backlight_ops.get_brightness(dm->backlight_dev[aconnector->bl_idx]);
-
-	if (real_brightness != init_brightness) {
-		dm->actual_brightness[aconnector->bl_idx] = real_brightness;
-		dm->brightness[aconnector->bl_idx] = real_brightness;
 	}
 
 	/* Link the registered backlight device to the DRM connector. If
@@ -10665,7 +10632,6 @@ static void amdgpu_dm_commit_streams(struct drm_atomic_state *state,
 	bool mode_set_reset_required = false;
 	u32 i;
 	struct dc_commit_streams_params params = {dc_state->streams, dc_state->stream_count};
-	bool set_backlight_level = false;
 
 	/* Disable writeback */
 	for_each_old_connector_in_state(state, connector, old_con_state, i) {
@@ -10785,7 +10751,6 @@ static void amdgpu_dm_commit_streams(struct drm_atomic_state *state,
 			acrtc->hw_mode = new_crtc_state->mode;
 			crtc->hwmode = new_crtc_state->mode;
 			mode_set_reset_required = true;
-			set_backlight_level = true;
 		} else if (modereset_required(new_crtc_state)) {
 			drm_dbg_atomic(dev,
 				       "Atomic commit: RESET. crtc id %d:[%p]\n",
@@ -10838,18 +10803,6 @@ static void amdgpu_dm_commit_streams(struct drm_atomic_state *state,
 		}
 	}
 
-	/* During boot up and resume the DC layer will reset the panel brightness
-	 * to fix a flicker issue.
-	 * It will cause the dm->actual_brightness is not the current panel brightness
-	 * level. (the dm->brightness is the correct panel level)
-	 * So we set the backlight level with dm->brightness value after set mode
-	 */
-	if (set_backlight_level) {
-		for (i = 0; i < dm->num_of_edps; i++) {
-			if (dm->backlight_dev[i])
-				amdgpu_dm_backlight_set_level(dm, i, dm->brightness[i]);
-		}
-	}
 }
 
 static void dm_set_writeback(struct amdgpu_display_manager *dm,
@@ -11354,13 +11307,6 @@ static void amdgpu_dm_atomic_commit_tail(struct drm_atomic_state *state)
 
 	/* Update audio instances for each connector. */
 	amdgpu_dm_commit_audio(dev, state);
-
-	/* restore the backlight level */
-	for (i = 0; i < dm->num_of_edps; i++) {
-		if (dm->backlight_dev[i] &&
-		    (dm->actual_brightness[i] != dm->brightness[i]))
-			amdgpu_dm_backlight_set_level(dm, i, dm->brightness[i]);
-	}
 
 	/*
 	 * send vblank event on all events not handled in flip and
