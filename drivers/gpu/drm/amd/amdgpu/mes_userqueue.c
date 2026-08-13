@@ -151,6 +151,8 @@ static int mes_userq_map(struct amdgpu_usermode_queue *queue)
 		return r;
 	}
 
+	amdgpu_mes_userq_queue_mapped(adev);
+
 	DRM_DEBUG_DRIVER("Queue (doorbell:%d) mapped successfully\n", userq_props->doorbell_index);
 	return 0;
 }
@@ -170,9 +172,13 @@ static int mes_userq_unmap(struct amdgpu_usermode_queue *queue)
 	amdgpu_mes_lock(&adev->mes);
 	r = adev->mes.funcs->remove_hw_queue(&adev->mes, &queue_input);
 	amdgpu_mes_unlock(&adev->mes);
-	if (r)
+	if (r) {
 		DRM_ERROR("Failed to unmap queue in HW, err (%d)\n", r);
-	return r;
+		return r;
+	}
+
+	amdgpu_mes_userq_queue_unmapped(adev);
+	return 0;
 }
 
 static int mes_userq_create_ctx_space(struct amdgpu_userq_mgr *uq_mgr,
