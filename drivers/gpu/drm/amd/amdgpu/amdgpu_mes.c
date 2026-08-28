@@ -852,6 +852,29 @@ int amdgpu_mes_update_enforce_isolation(struct amdgpu_device *adev)
 	return r;
 }
 
+int amdgpu_mes_notify_unmap_queue(struct amdgpu_device *adev)
+{
+	struct mes_misc_op_input op_input = {0};
+	int r;
+
+	op_input.op = MES_MISC_OP_NOTIFY_WORK_ON_UNMAPPED_QUEUE;
+
+	if (!adev->mes.funcs->misc_op) {
+		dev_err(adev->dev, "mes notify unmap queue is not supported!\n");
+		r = -EINVAL;
+		goto error;
+	}
+
+	amdgpu_mes_lock(&adev->mes);
+	r = adev->mes.funcs->misc_op(&adev->mes, &op_input);
+	amdgpu_mes_unlock(&adev->mes);
+	if (r)
+		dev_err(adev->dev, "failed to notify unmap queue.\n");
+
+error:
+	return r;
+}
+
 #if defined(CONFIG_DEBUG_FS)
 
 static int amdgpu_debugfs_mes_event_log_show(struct seq_file *m, void *unused)

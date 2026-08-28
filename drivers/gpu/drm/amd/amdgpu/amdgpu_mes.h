@@ -347,6 +347,7 @@ enum mes_misc_opcode {
 	MES_MISC_OP_WRM_REG_WR_WAIT,
 	MES_MISC_OP_SET_SHADER_DEBUGGER,
 	MES_MISC_OP_CHANGE_CONFIG,
+	MES_MISC_OP_NOTIFY_WORK_ON_UNMAPPED_QUEUE,
 };
 
 struct mes_misc_op_input {
@@ -555,5 +556,6 @@ bool amdgpu_mes_suspend_resume_all_supported(struct amdgpu_device *adev);
 bool amdgpu_mes_queue_reset_by_mes_supported(struct amdgpu_device *adev);
 
 int amdgpu_mes_update_enforce_isolation(struct amdgpu_device *adev);
+int amdgpu_mes_notify_unmap_queue(struct amdgpu_device *adev);
 
 #endif /* __AMDGPU_MES_H__ */
