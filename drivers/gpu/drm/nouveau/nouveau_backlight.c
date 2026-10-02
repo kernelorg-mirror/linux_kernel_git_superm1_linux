@@ -73,18 +73,22 @@ nv40_get_intensity(struct backlight_device *bd)
 }
 
 static int
-nv40_set_intensity(struct backlight_device *bd)
+nv40_set_intensity_value(struct nouveau_encoder *nv_encoder, int val)
 {
-	struct nouveau_encoder *nv_encoder = bl_get_data(bd);
 	struct nouveau_drm *drm = nouveau_drm(nv_encoder->base.base.dev);
 	struct nvif_object *device = &drm->client.device.object;
-	int val = bd->props.brightness;
 	int reg = nvif_rd32(device, NV40_PMC_BACKLIGHT);
 
 	nvif_wr32(device, NV40_PMC_BACKLIGHT,
 		  (val << 16) | (reg & ~NV40_PMC_BACKLIGHT_MASK));
 
 	return 0;
+}
+
+static int
+nv40_set_intensity(struct backlight_device *bd)
+{
+	return nv40_set_intensity_value(bl_get_data(bd), bd->props.brightness);
 }
 
 static const struct backlight_ops nv40_bl_ops = {
@@ -105,6 +109,8 @@ nv40_backlight_init(struct nouveau_encoder *encoder,
 		return -ENODEV;
 
 	props->max_brightness = 31;
+	props->brightness = (nvif_rd32(device, NV40_PMC_BACKLIGHT) &
+			     NV40_PMC_BACKLIGHT_MASK) >> 16;
 	*ops = &nv40_bl_ops;
 	return 0;
 }
@@ -234,12 +240,15 @@ nv50_backlight_init(struct nouveau_backlight *bl,
 		    const struct backlight_ops **ops)
 {
 	struct nouveau_drm *drm = nouveau_drm(nv_encoder->base.base.dev);
+	int brightness;
+
+	brightness = nvif_outp_bl_get(&nv_encoder->outp);
 
 	/*
 	 * Note when this runs the connectors have not been probed yet,
 	 * so nv_conn->base.status is not set yet.
 	 */
-	if (nvif_outp_bl_get(&nv_encoder->outp) < 0 ||
+	if (brightness < 0 ||
 	    drm_helper_probe_detect(&nv_conn->base, NULL, false) != connector_status_connected)
 		return -ENODEV;
 
@@ -284,6 +293,7 @@ nv50_backlight_init(struct nouveau_backlight *bl,
 
 	*ops = &nv50_bl_ops;
 	props->max_brightness = 100;
+	props->brightness = brightness;
 	return 0;
 }
 
@@ -317,10 +327,13 @@ nouveau_backlight_init(struct drm_connector *connector)
 	bl = kzalloc_obj(*bl);
 	if (!bl)
 		return -ENOMEM;
+	bl->id = -1;
+	bl->encoder = nv_encoder;
 
 	switch (device->info.family) {
 	case NV_DEVICE_INFO_V0_CURIE:
 		ret = nv40_backlight_init(nv_encoder, &props, &ops);
+		bl->uses_nv40 = true;
 		break;
 	case NV_DEVICE_INFO_V0_TESLA:
 	case NV_DEVICE_INFO_V0_FERMI:
@@ -349,26 +362,39 @@ nouveau_backlight_init(struct drm_connector *connector)
 		goto fail_alloc;
 	}
 
-	if (!nouveau_get_backlight_name(backlight_name, bl)) {
-		NV_ERROR(drm, "Failed to retrieve a unique name for the backlight interface\n");
-		goto fail_alloc;
-	}
-
 	props.type = BACKLIGHT_RAW;
-	bl->dev = backlight_device_register(backlight_name, connector->kdev,
-					    nv_encoder, ops, &props);
-	if (IS_ERR(bl->dev)) {
-		if (bl->id >= 0)
-			ida_free(&bl_ida, bl->id);
-		ret = PTR_ERR(bl->dev);
-		goto fail_alloc;
+	bl->brightness = props.brightness;
+	bl->max_brightness = props.max_brightness;
+	if (IS_ENABLED(CONFIG_DRM_LUMINANCE)) {
+		ret = drm_connector_attach_luminance_property(connector, 0, props.max_brightness,
+							      props.brightness);
+		if (ret)
+			goto fail_alloc;
+	} else {
+		if (!nouveau_get_backlight_name(backlight_name, bl)) {
+			NV_ERROR(drm,
+				 "Failed to retrieve a unique name for the backlight interface\n");
+			goto fail_alloc;
+		}
+
+		bl->dev = backlight_device_register(backlight_name, connector->kdev,
+						    nv_encoder, ops, &props);
+		if (IS_ERR(bl->dev)) {
+			if (bl->id >= 0)
+				ida_free(&bl_ida, bl->id);
+			ret = PTR_ERR(bl->dev);
+			goto fail_alloc;
+		}
 	}
 
 	nouveau_connector(connector)->backlight = bl;
-	if (!bl->dev->props.brightness)
-		bl->dev->props.brightness =
-			bl->dev->ops->get_brightness(bl->dev);
-	backlight_update_status(bl->dev);
+	if (bl->dev) {
+		if (!bl->dev->props.brightness)
+			bl->dev->props.brightness =
+				bl->dev->ops->get_brightness(bl->dev);
+		bl->brightness = bl->dev->props.brightness;
+		backlight_update_status(bl->dev);
+	}
 
 	return 0;
 
@@ -396,7 +422,9 @@ nouveau_backlight_fini(struct drm_connector *connector)
 	if (bl->id >= 0)
 		ida_free(&bl_ida, bl->id);
 
-	backlight_device_unregister(bl->dev);
+	if (!IS_ENABLED(CONFIG_DRM_LUMINANCE))
+		backlight_device_unregister(bl->dev);
+
 	nv_conn->backlight = NULL;
 	kfree(bl);
 }
@@ -411,4 +439,44 @@ void
 nouveau_backlight_dtor(void)
 {
 	ida_destroy(&bl_ida);
+}
+
+void
+nouveau_backlight_set_luminance(const struct drm_connector_state *conn_state)
+{
+	struct nouveau_connector *nv_connector = nouveau_connector(conn_state->connector);
+	struct nouveau_backlight *bl = nv_connector->backlight;
+	unsigned int luminance = conn_state->luminance;
+
+	if (!bl || !bl->max_brightness)
+		return;
+
+	bl->brightness = luminance;
+	if (bl->uses_dpcd) {
+		drm_edp_backlight_set_level(&nv_connector->aux, &bl->edp_info,
+					    luminance);
+		return;
+	}
+
+	if (bl->uses_nv40)
+		nv40_set_intensity_value(bl->encoder, luminance);
+	else
+		nvif_outp_bl_set(&bl->encoder->outp, luminance);
+}
+
+void
+nouveau_backlight_disable_luminance(const struct drm_connector_state *conn_state)
+{
+	struct nouveau_connector *nv_connector = nouveau_connector(conn_state->connector);
+	struct nouveau_backlight *bl = nv_connector->backlight;
+
+	if (!bl)
+		return;
+
+	if (bl->uses_dpcd)
+		drm_edp_backlight_disable(&nv_connector->aux, &bl->edp_info);
+	else if (bl->uses_nv40)
+		nv40_set_intensity_value(bl->encoder, 0);
+	else
+		nvif_outp_bl_set(&bl->encoder->outp, 0);
 }
