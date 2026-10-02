@@ -105,7 +105,7 @@ config TINYDRM_HX8357D
 	select DRM_KMS_HELPER
 	select DRM_GEM_DMA_HELPER
 	select DRM_MIPI_DBI
-	select BACKLIGHT_CLASS_DEVICE
+	select BACKLIGHT_CLASS_DEVICE if !DRM_LUMINANCE
 	help
 	  DRM driver for the following HX8357D panels:
 	  * YX350HV15-T 3.5" 340x350 TFT (Adafruit 3.5")
