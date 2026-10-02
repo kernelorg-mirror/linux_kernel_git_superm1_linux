@@ -604,11 +604,13 @@ int psb_fbdev_driver_fbdev_probe(struct drm_fb_helper *fb_helper,
 #endif
 
 /* backlight.c */
-int gma_backlight_init(struct drm_device *dev);
+int gma_backlight_init(struct drm_device *dev, struct drm_connector *connector);
 void gma_backlight_exit(struct drm_device *dev);
 void gma_backlight_disable(struct drm_device *dev);
 void gma_backlight_enable(struct drm_device *dev);
 void gma_backlight_set(struct drm_device *dev, int v);
+void gma_connector_set_luminance(const struct drm_connector_state *conn_state);
+void gma_connector_disable_luminance(const struct drm_connector_state *conn_state);
 
 /* oaktrail_crtc.c */
 extern const struct drm_crtc_helper_funcs oaktrail_helper_funcs;

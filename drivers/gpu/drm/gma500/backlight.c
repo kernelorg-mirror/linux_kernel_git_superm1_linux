@@ -8,7 +8,6 @@
  */
 
 #include <linux/backlight.h>
-
 #include <acpi/video.h>
 
 #include <drm/drm_print.h>
@@ -73,10 +72,9 @@ static const struct backlight_ops gma_backlight_ops __maybe_unused = {
 	.update_status  = gma_backlight_update_status,
 };
 
-int gma_backlight_init(struct drm_device *dev)
+int gma_backlight_init(struct drm_device *dev, struct drm_connector *connector)
 {
 	struct drm_psb_private *dev_priv = to_drm_psb_private(dev);
-	struct backlight_properties props __maybe_unused = {};
 	int ret;
 
 	dev_priv->backlight_enabled = true;
@@ -92,28 +90,43 @@ int gma_backlight_init(struct drm_device *dev)
 		return 0;
 	}
 
-#ifdef CONFIG_BACKLIGHT_CLASS_DEVICE
-	props.brightness = dev_priv->backlight_level;
-	props.max_brightness = PSB_MAX_BRIGHTNESS;
-	props.type = BACKLIGHT_RAW;
+	if (IS_ENABLED(CONFIG_DRM_LUMINANCE))
+		return drm_connector_attach_luminance_property(connector, 0,
+							 PSB_MAX_BRIGHTNESS,
+							 dev_priv->backlight_level);
 
-	dev_priv->backlight_device =
-		backlight_device_register(dev_priv->ops->backlight_name,
-					  dev->dev, dev,
-					  &gma_backlight_ops, &props);
-	if (IS_ERR(dev_priv->backlight_device))
-		return PTR_ERR(dev_priv->backlight_device);
-#endif
+	{
+		struct backlight_properties props = {};
+
+		props.brightness = dev_priv->backlight_level;
+		props.max_brightness = PSB_MAX_BRIGHTNESS;
+		props.type = BACKLIGHT_RAW;
+
+		dev_priv->backlight_device =
+			backlight_device_register(dev_priv->ops->backlight_name,
+						  dev->dev, dev,
+						  &gma_backlight_ops, &props);
+		if (IS_ERR(dev_priv->backlight_device))
+			return PTR_ERR(dev_priv->backlight_device);
+	}
 
 	return 0;
 }
 
+void gma_connector_set_luminance(const struct drm_connector_state *conn_state)
+{
+	gma_backlight_set(conn_state->connector->dev, conn_state->luminance);
+}
+
+void gma_connector_disable_luminance(const struct drm_connector_state *conn_state)
+{
+	gma_backlight_disable(conn_state->connector->dev);
+}
+
 void gma_backlight_exit(struct drm_device *dev)
 {
-#ifdef CONFIG_BACKLIGHT_CLASS_DEVICE
 	struct drm_psb_private *dev_priv = to_drm_psb_private(dev);
 
 	if (dev_priv->backlight_device)
 		backlight_device_unregister(dev_priv->backlight_device);
-#endif
 }

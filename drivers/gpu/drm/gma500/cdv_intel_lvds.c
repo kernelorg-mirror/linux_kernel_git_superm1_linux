@@ -412,6 +412,8 @@ static const struct drm_connector_helper_funcs
 	.get_modes = cdv_intel_lvds_get_modes,
 	.mode_valid = cdv_intel_lvds_mode_valid,
 	.best_encoder = gma_best_encoder,
+	.set_luminance = gma_connector_set_luminance,
+	.disable_luminance = gma_connector_disable_luminance,
 };
 
 static const struct drm_connector_funcs cdv_intel_lvds_connector_funcs = {
