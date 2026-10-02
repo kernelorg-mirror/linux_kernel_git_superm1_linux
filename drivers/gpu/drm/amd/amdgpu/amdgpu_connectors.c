@@ -798,11 +798,31 @@ static int amdgpu_connector_set_lcd_property(struct drm_connector *connector,
 	return 0;
 }
 
+static void amdgpu_connector_set_luminance(const struct drm_connector_state *conn_state)
+{
+	struct drm_encoder *encoder =
+		amdgpu_connector_best_single_encoder(conn_state->connector);
+
+	if (encoder)
+		amdgpu_atombios_encoder_set_backlight_level(to_amdgpu_encoder(encoder),
+							    conn_state->luminance);
+}
+
+static void amdgpu_connector_disable_luminance(const struct drm_connector_state *conn_state)
+{
+	struct drm_encoder *encoder =
+		amdgpu_connector_best_single_encoder(conn_state->connector);
+
+	if (encoder)
+		amdgpu_atombios_encoder_set_backlight_level(to_amdgpu_encoder(encoder), 0);
+}
 
 static const struct drm_connector_helper_funcs amdgpu_connector_lvds_helper_funcs = {
 	.get_modes = amdgpu_connector_lvds_get_modes,
 	.mode_valid = amdgpu_connector_lvds_mode_valid,
 	.best_encoder = amdgpu_connector_best_single_encoder,
+	.set_luminance = amdgpu_connector_set_luminance,
+	.disable_luminance = amdgpu_connector_disable_luminance,
 };
 
 static const struct drm_connector_funcs amdgpu_connector_lvds_funcs = {

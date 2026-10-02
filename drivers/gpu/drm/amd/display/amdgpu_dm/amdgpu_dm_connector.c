@@ -1922,7 +1922,8 @@ STATIC_IFN_KUNIT void amdgpu_dm_connector_destroy(struct drm_connector *connecto
 	}
 
 	if (aconnector->bl_idx != -1) {
-		backlight_device_unregister(dm->backlight_dev[aconnector->bl_idx]);
+		if (dm->backlight_dev[aconnector->bl_idx])
+			backlight_device_unregister(dm->backlight_dev[aconnector->bl_idx]);
 		dm->backlight_dev[aconnector->bl_idx] = NULL;
 	}
 
@@ -2016,7 +2017,8 @@ amdgpu_dm_connector_late_register(struct drm_connector *connector)
 			return r;
 	}
 
-	amdgpu_dm_register_backlight_device(amdgpu_dm_connector);
+	if (!IS_ENABLED(CONFIG_DRM_LUMINANCE))
+		amdgpu_dm_register_backlight_device(amdgpu_dm_connector);
 
 	if ((connector->connector_type == DRM_MODE_CONNECTOR_DisplayPort) ||
 	    (connector->connector_type == DRM_MODE_CONNECTOR_eDP)) {
@@ -2679,6 +2681,7 @@ amdgpu_dm_connector_helper_funcs = {
 	.get_modes = get_modes,
 	.mode_valid = amdgpu_dm_connector_mode_valid,
 	.atomic_check = amdgpu_dm_connector_atomic_check,
+	.set_luminance = amdgpu_dm_set_luminance,
 };
 
 int amdgpu_dm_convert_dc_color_depth_into_bpc(enum dc_color_depth display_color_depth)

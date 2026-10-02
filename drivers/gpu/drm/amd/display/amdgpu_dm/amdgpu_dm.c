@@ -5175,8 +5175,11 @@ static void amdgpu_dm_atomic_commit_tail(struct drm_atomic_commit *state)
 		}
 
 		/* Skip any modesets/resets */
-		if (!acrtc || drm_atomic_crtc_needs_modeset(new_crtc_state))
+		if (!acrtc || !new_crtc_state ||
+		    drm_atomic_crtc_needs_modeset(new_crtc_state))
 			continue;
+
+		drm_connector_update_privacy_screen(new_con_state);
 
 		dm_new_crtc_state = to_dm_crtc_state(new_crtc_state);
 		dm_old_crtc_state = to_dm_crtc_state(old_crtc_state);
@@ -5257,8 +5260,6 @@ static void amdgpu_dm_atomic_commit_tail(struct drm_atomic_commit *state)
 					    &stream_update);
 		mutex_unlock(&dm->dc_lock);
 		kfree(dummy_updates);
-
-		drm_connector_update_privacy_screen(new_con_state);
 	}
 
 	/**
@@ -5376,11 +5377,16 @@ static void amdgpu_dm_atomic_commit_tail(struct drm_atomic_commit *state)
 	/* Update audio instances for each connector. */
 	amdgpu_dm_commit_audio(dev, state);
 
-	/* restore the backlight level */
-	for (i = 0; i < dm->num_of_edps; i++) {
-		if (dm->backlight_dev[i] &&
-		    (dm->actual_brightness[i] != dm->brightness[i]))
-			amdgpu_dm_backlight_set_level(dm, i, dm->brightness[i]);
+	if (IS_ENABLED(CONFIG_DRM_LUMINANCE)) {
+		/* Apply brightness after the display pipeline is enabled. */
+		drm_atomic_helper_commit_luminance_enables(state);
+	} else {
+		/* Restore the legacy backlight level. */
+		for (i = 0; i < dm->num_of_edps; i++) {
+			if (dm->backlight_dev[i] &&
+			    dm->actual_brightness[i] != dm->brightness[i])
+				amdgpu_dm_backlight_set_level(dm, i, dm->brightness[i]);
+		}
 	}
 
 	/*
