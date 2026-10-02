@@ -16,6 +16,7 @@
 #include <drm/drm_modeset_helper_vtables.h>
 #include <drm/drm_print.h>
 #include <drm/drm_probe_helper.h>
+
 #include <drm/gud.h>
 
 #include "gud_internal.h"
@@ -25,6 +26,7 @@ struct gud_connector {
 	struct drm_encoder encoder;
 	struct backlight_device *backlight;
 	struct work_struct backlight_work;
+	unsigned int brightness;
 
 	/* Supported properties */
 	u16 *properties;
@@ -84,7 +86,7 @@ retry:
 	}
 
 	/* Reuse tv.brightness to avoid having to subclass */
-	connector_state->tv.brightness = gconn->backlight->props.brightness;
+	connector_state->tv.brightness = READ_ONCE(gconn->brightness);
 
 	ret = drm_atomic_commit(state);
 out:
@@ -110,6 +112,8 @@ static int gud_connector_backlight_update_status(struct backlight_device *bd)
 	struct drm_connector *connector = bl_get_data(bd);
 	struct gud_connector *gconn = to_gud_connector(connector);
 
+	WRITE_ONCE(gconn->brightness, bd->props.brightness);
+
 	/* The USB timeout is 5 seconds so use system_long_wq for worst case scenario */
 	queue_work(system_long_wq, &gconn->backlight_work);
 
@@ -131,6 +135,19 @@ static int gud_connector_backlight_register(struct gud_connector *gconn)
 		.max_brightness = 100,
 		.brightness = gconn->initial_brightness,
 	};
+
+	gconn->brightness = props.brightness;
+
+	if (IS_ENABLED(CONFIG_DRM_LUMINANCE)) {
+		int ret;
+
+		ret = drm_connector_attach_luminance_property(connector, 0, props.max_brightness,
+							      props.brightness);
+		if (ret)
+			return ret;
+
+		return 0;
+	}
 
 	name = kasprintf(GFP_KERNEL, "card%d-%s-backlight",
 			 connector->dev->primary->index, connector->name);
@@ -314,11 +331,36 @@ static int gud_connector_atomic_check(struct drm_connector *connector,
 	return 0;
 }
 
+static void gud_connector_set_luminance(const struct drm_connector_state *conn_state);
+static void gud_connector_disable_luminance(const struct drm_connector_state *conn_state);
+
 static const struct drm_connector_helper_funcs gud_connector_helper_funcs = {
 	.detect_ctx = gud_connector_detect,
 	.get_modes = gud_connector_get_modes,
 	.atomic_check = gud_connector_atomic_check,
+	.set_luminance = gud_connector_set_luminance,
+	.disable_luminance = gud_connector_disable_luminance,
 };
+
+static void gud_connector_set_luminance(const struct drm_connector_state *conn_state)
+{
+	struct drm_connector *connector = conn_state->connector;
+	struct gud_connector *gconn = to_gud_connector(connector);
+	unsigned int luminance = conn_state->luminance;
+
+	WRITE_ONCE(gconn->brightness, luminance);
+
+	/* The workqueue will apply it to the hardware */
+	queue_work(system_long_wq, &gconn->backlight_work);
+}
+
+static void gud_connector_disable_luminance(const struct drm_connector_state *conn_state)
+{
+	struct gud_connector *gconn = to_gud_connector(conn_state->connector);
+
+	WRITE_ONCE(gconn->brightness, 0);
+	queue_work(system_long_wq, &gconn->backlight_work);
+}
 
 static int gud_connector_late_register(struct drm_connector *connector)
 {
@@ -334,7 +376,9 @@ static void gud_connector_early_unregister(struct drm_connector *connector)
 {
 	struct gud_connector *gconn = to_gud_connector(connector);
 
-	backlight_device_unregister(gconn->backlight);
+	if (gconn->backlight)
+		backlight_device_unregister(gconn->backlight);
+
 	cancel_work_sync(&gconn->backlight_work);
 }
 
