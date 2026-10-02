@@ -191,6 +191,21 @@ void amdgpu_atombios_encoder_init_backlight(struct amdgpu_encoder *amdgpu_encode
 		goto register_acpi_backlight;
 	}
 
+	dig = amdgpu_encoder->enc_priv;
+	if (IS_ENABLED(CONFIG_DRM_LUMINANCE)) {
+		unsigned int brightness;
+
+		brightness = amdgpu_atombios_encoder_get_backlight_level(amdgpu_encoder);
+		if (drm_connector_attach_luminance_property(drm_connector, 0,
+							    AMDGPU_MAX_BL_LEVEL,
+							     brightness))
+			return;
+
+		dig->backlight_level = brightness;
+		dig->bl_dev = NULL;
+		return;
+	}
+
 	pdata = kmalloc_obj(struct amdgpu_backlight_privdata);
 	if (!pdata) {
 		DRM_ERROR("Memory allocation failed\n");
@@ -211,7 +226,6 @@ void amdgpu_atombios_encoder_init_backlight(struct amdgpu_encoder *amdgpu_encode
 
 	pdata->encoder = amdgpu_encoder;
 
-	dig = amdgpu_encoder->enc_priv;
 	dig->bl_dev = bd;
 
 	bd->props.brightness = amdgpu_atombios_encoder_get_backlight_brightness(bd);
@@ -2123,4 +2137,3 @@ amdgpu_atombios_encoder_get_dig_info(struct amdgpu_encoder *amdgpu_encoder)
 
 	return dig;
 }
-
