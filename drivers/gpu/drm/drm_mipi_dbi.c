@@ -496,6 +496,42 @@ int drm_mipi_dbi_connector_helper_get_modes(struct drm_connector *connector)
 }
 EXPORT_SYMBOL(drm_mipi_dbi_connector_helper_get_modes);
 
+int drm_mipi_dbi_connector_attach_luminance_property(struct drm_connector *connector)
+{
+	struct mipi_dbi_dev *dbidev = drm_to_mipi_dbi_dev(connector->dev);
+	struct backlight_device *backlight = dbidev->backlight;
+
+	if (!IS_ENABLED(CONFIG_DRM_LUMINANCE) || !backlight)
+		return 0;
+
+	return drm_connector_attach_luminance_property(connector, 0,
+					backlight->props.max_brightness,
+					backlight->props.brightness);
+}
+EXPORT_SYMBOL(drm_mipi_dbi_connector_attach_luminance_property);
+
+void drm_mipi_dbi_connector_set_luminance(const struct drm_connector_state *conn_state)
+{
+	struct mipi_dbi_dev *dbidev =
+		drm_to_mipi_dbi_dev(conn_state->connector->dev);
+
+	if (!dbidev->backlight)
+		return;
+
+	dbidev->backlight->props.brightness = conn_state->luminance;
+	backlight_update_status(dbidev->backlight);
+}
+EXPORT_SYMBOL(drm_mipi_dbi_connector_set_luminance);
+
+void drm_mipi_dbi_connector_disable_luminance(const struct drm_connector_state *conn_state)
+{
+	struct mipi_dbi_dev *dbidev =
+		drm_to_mipi_dbi_dev(conn_state->connector->dev);
+
+	backlight_disable(dbidev->backlight);
+}
+EXPORT_SYMBOL(drm_mipi_dbi_connector_disable_luminance);
+
 static int mipi_dbi_rotate_mode(struct drm_display_mode *mode,
 				unsigned int rotation)
 {

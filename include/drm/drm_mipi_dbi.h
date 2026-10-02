@@ -263,9 +263,14 @@ void drm_mipi_dbi_crtc_helper_atomic_disable(struct drm_crtc *crtc,
 	.atomic_destroy_state = drm_atomic_helper_connector_destroy_state
 
 int drm_mipi_dbi_connector_helper_get_modes(struct drm_connector *connector);
+int drm_mipi_dbi_connector_attach_luminance_property(struct drm_connector *connector);
+void drm_mipi_dbi_connector_set_luminance(const struct drm_connector_state *conn_state);
+void drm_mipi_dbi_connector_disable_luminance(const struct drm_connector_state *conn_state);
 
 #define DRM_MIPI_DBI_CONNECTOR_HELPER_FUNCS \
-	.get_modes = drm_mipi_dbi_connector_helper_get_modes
+	.get_modes = drm_mipi_dbi_connector_helper_get_modes, \
+	.set_luminance = drm_mipi_dbi_connector_set_luminance, \
+	.disable_luminance = drm_mipi_dbi_connector_disable_luminance
 
 /*
  * Mode config
