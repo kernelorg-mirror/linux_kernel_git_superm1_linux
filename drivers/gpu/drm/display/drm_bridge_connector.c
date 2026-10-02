@@ -18,6 +18,7 @@
 #include <drm/drm_edid.h>
 #include <drm/drm_managed.h>
 #include <drm/drm_modeset_helper_vtables.h>
+#include <drm/drm_panel.h>
 #include <drm/drm_print.h>
 #include <drm/drm_probe_helper.h>
 #include <drm/display/drm_hdcp_helper.h>
@@ -123,6 +124,18 @@ struct drm_bridge_connector {
 	 * DRM_BRIDGE_OP_HDMI_CEC_NOTIFIER).
 	 */
 	struct drm_bridge *bridge_hdmi_cec;
+	/**
+	 * @bridge_luminance:
+	 *
+	 * The last bridge in the chain that controls panel luminance.
+	 */
+	struct drm_bridge *bridge_luminance;
+	/**
+	 * @panel:
+	 *
+	 * The panel at the end of the bridge chain, if any.
+	 */
+	struct drm_panel *panel;
 
 	/**
 	 * @hdmi_funcs:
@@ -420,6 +433,30 @@ static int drm_bridge_connector_atomic_check(struct drm_connector *connector,
 	return 0;
 }
 
+static void
+drm_bridge_connector_set_luminance(const struct drm_connector_state *conn_state)
+{
+	struct drm_bridge_connector *bridge_connector =
+		to_drm_bridge_connector(conn_state->connector);
+
+	drm_panel_set_luminance(bridge_connector->panel, conn_state->luminance);
+	if (bridge_connector->bridge_luminance)
+		bridge_connector->bridge_luminance->funcs->set_luminance
+			(bridge_connector->bridge_luminance, conn_state->luminance);
+}
+
+static void
+drm_bridge_connector_disable_luminance(const struct drm_connector_state *conn_state)
+{
+	struct drm_bridge_connector *bridge_connector =
+		to_drm_bridge_connector(conn_state->connector);
+
+	drm_panel_disable_luminance(bridge_connector->panel);
+	if (bridge_connector->bridge_luminance)
+		bridge_connector->bridge_luminance->funcs->set_luminance
+			(bridge_connector->bridge_luminance, 0);
+}
+
 static const struct drm_connector_helper_funcs drm_bridge_connector_helper_funcs = {
 	.get_modes = drm_bridge_connector_get_modes,
 	.detect_ctx = drm_bridge_connector_detect_ctx,
@@ -428,6 +465,8 @@ static const struct drm_connector_helper_funcs drm_bridge_connector_helper_funcs
 	.enable_hpd = drm_bridge_connector_enable_hpd,
 	.disable_hpd = drm_bridge_connector_disable_hpd,
 	.atomic_check = drm_bridge_connector_atomic_check,
+	.set_luminance = drm_bridge_connector_set_luminance,
+	.disable_luminance = drm_bridge_connector_disable_luminance,
 };
 
 static enum drm_mode_status
@@ -834,6 +873,7 @@ static void drm_bridge_connector_put_bridges(struct drm_device *dev, void *data)
 	drm_bridge_put(bridge_connector->bridge_hdmi_audio);
 	drm_bridge_put(bridge_connector->bridge_dp_audio);
 	drm_bridge_put(bridge_connector->bridge_hdmi_cec);
+	drm_bridge_put(bridge_connector->bridge_luminance);
 }
 
 /**
@@ -916,6 +956,13 @@ struct drm_connector *drm_bridge_connector_init(struct drm_device *drm,
 		if (bridge->ops & DRM_BRIDGE_OP_DETECT) {
 			drm_bridge_put(bridge_connector->bridge_detect);
 			bridge_connector->bridge_detect = drm_bridge_get(bridge);
+		}
+		if (bridge->ops & DRM_BRIDGE_OP_LUMINANCE) {
+			if (!bridge->funcs->set_luminance)
+				return ERR_PTR(-EINVAL);
+
+			drm_bridge_put(bridge_connector->bridge_luminance);
+			bridge_connector->bridge_luminance = drm_bridge_get(bridge);
 		}
 		if (bridge->ops & DRM_BRIDGE_OP_HDMI) {
 			if (bridge_connector->bridge_hdmi)
@@ -1142,6 +1189,24 @@ struct drm_connector *drm_bridge_connector_init(struct drm_device *drm,
 
 	if (panel_bridge)
 		drm_panel_bridge_set_orientation(connector, panel_bridge);
+
+	if (panel_bridge) {
+		bridge_connector->panel = drm_panel_bridge_to_panel(panel_bridge);
+		ret = drm_panel_attach_luminance_property(bridge_connector->panel,
+							  connector);
+		if (ret)
+			return ERR_PTR(ret);
+	}
+
+	if (bridge_connector->bridge_luminance && !connector->luminance_property) {
+		struct drm_bridge *bridge = bridge_connector->bridge_luminance;
+
+		ret = drm_connector_attach_luminance_property(connector, 0,
+							      bridge->luminance_max,
+							     bridge->luminance);
+		if (ret)
+			return ERR_PTR(ret);
+	}
 
 	if (support_hdcp && IS_REACHABLE(CONFIG_DRM_DISPLAY_HELPER) &&
 	    IS_ENABLED(CONFIG_DRM_DISPLAY_HDCP_HELPER))

@@ -45,9 +45,29 @@ static int panel_bridge_connector_get_modes(struct drm_connector *connector)
 	return drm_panel_get_modes(panel_bridge->panel, connector);
 }
 
+static void
+panel_bridge_connector_set_luminance(const struct drm_connector_state *conn_state)
+{
+	struct panel_bridge *panel_bridge =
+		drm_connector_to_panel_bridge(conn_state->connector);
+
+	drm_panel_set_luminance(panel_bridge->panel, conn_state->luminance);
+}
+
+static void
+panel_bridge_connector_disable_luminance(const struct drm_connector_state *conn_state)
+{
+	struct panel_bridge *panel_bridge =
+		drm_connector_to_panel_bridge(conn_state->connector);
+
+	drm_panel_disable_luminance(panel_bridge->panel);
+}
+
 static const struct drm_connector_helper_funcs
 panel_bridge_connector_helper_funcs = {
 	.get_modes = panel_bridge_connector_get_modes,
+	.set_luminance = panel_bridge_connector_set_luminance,
+	.disable_luminance = panel_bridge_connector_disable_luminance,
 };
 
 static const struct drm_connector_funcs panel_bridge_connector_funcs = {
@@ -81,6 +101,10 @@ static int panel_bridge_attach(struct drm_bridge *bridge,
 	}
 
 	drm_panel_bridge_set_orientation(connector, bridge);
+
+	ret = drm_panel_attach_luminance_property(panel_bridge->panel, connector);
+	if (ret)
+		return ret;
 
 	drm_connector_attach_encoder(&panel_bridge->connector,
 					  encoder);
@@ -232,6 +256,21 @@ bool drm_bridge_is_panel(const struct drm_bridge *bridge)
 	return bridge->funcs == &panel_bridge_bridge_funcs;
 }
 EXPORT_SYMBOL(drm_bridge_is_panel);
+
+/**
+ * drm_panel_bridge_to_panel - return the panel wrapped by a panel bridge
+ * @bridge: panel bridge
+ *
+ * Return: the wrapped panel, or %NULL if @bridge isn't a panel bridge
+ */
+struct drm_panel *drm_panel_bridge_to_panel(struct drm_bridge *bridge)
+{
+	if (!drm_bridge_is_panel(bridge))
+		return NULL;
+
+	return drm_bridge_to_panel_bridge(bridge)->panel;
+}
+EXPORT_SYMBOL(drm_panel_bridge_to_panel);
 
 /**
  * drm_panel_bridge_add - Creates a &drm_bridge and &drm_connector that

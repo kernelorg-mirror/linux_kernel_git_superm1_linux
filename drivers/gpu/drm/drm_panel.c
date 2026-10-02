@@ -342,6 +342,61 @@ exit:
 EXPORT_SYMBOL(drm_panel_disable);
 
 /**
+ * drm_panel_attach_luminance_property - expose a panel backlight through DRM
+ * @panel: panel whose backlight is controlled
+ * @connector: connector on which to expose the property
+ *
+ * The backlight class device remains the internal hardware backend. When the
+ * luminance UAPI is enabled, userspace controls that backend through the DRM
+ * connector property instead.
+ *
+ * Return: 0 on success or a negative error code
+ */
+int drm_panel_attach_luminance_property(struct drm_panel *panel,
+					struct drm_connector *connector)
+{
+	struct backlight_device *backlight;
+
+	if (!IS_ENABLED(CONFIG_DRM_LUMINANCE) || !panel)
+		return 0;
+
+	backlight = panel->backlight;
+	if (!backlight)
+		return 0;
+
+	return drm_connector_attach_luminance_property(connector, 0,
+					backlight->props.max_brightness,
+					backlight->props.brightness);
+}
+EXPORT_SYMBOL(drm_panel_attach_luminance_property);
+
+/**
+ * drm_panel_set_luminance - set a panel backlight's relative luminance
+ * @panel: panel whose backlight is controlled
+ * @luminance: relative luminance level
+ */
+void drm_panel_set_luminance(struct drm_panel *panel, unsigned int luminance)
+{
+	if (!panel || !panel->backlight)
+		return;
+
+	panel->backlight->props.brightness = luminance;
+	backlight_update_status(panel->backlight);
+}
+EXPORT_SYMBOL(drm_panel_set_luminance);
+
+/**
+ * drm_panel_disable_luminance - turn off a panel backlight
+ * @panel: panel whose backlight is controlled
+ */
+void drm_panel_disable_luminance(struct drm_panel *panel)
+{
+	if (panel)
+		backlight_disable(panel->backlight);
+}
+EXPORT_SYMBOL(drm_panel_disable_luminance);
+
+/**
  * drm_panel_get_modes - probe the available display modes of a panel
  * @panel: DRM panel
  * @connector: DRM connector
