@@ -278,7 +278,7 @@ config DRM_PARADE_PS8622
 	depends on OF
 	select DRM_PANEL
 	select DRM_KMS_HELPER
-	select BACKLIGHT_CLASS_DEVICE
+	select BACKLIGHT_CLASS_DEVICE if !DRM_LUMINANCE
 	help
 	  Parade eDP-LVDS bridge chip driver.
 
