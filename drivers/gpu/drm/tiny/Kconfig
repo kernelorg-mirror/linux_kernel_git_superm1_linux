@@ -160,7 +160,7 @@ config TINYDRM_ILI9486
 	select DRM_KMS_HELPER
 	select DRM_GEM_DMA_HELPER
 	select DRM_MIPI_DBI
-	select BACKLIGHT_CLASS_DEVICE
+	select BACKLIGHT_CLASS_DEVICE if !DRM_LUMINANCE
 	help
 	  DRM driver for the following Ilitek ILI9486 panels:
 	  * PISCREEN 3.5" 320x480 TFT (Ozzmaker 3.5")
