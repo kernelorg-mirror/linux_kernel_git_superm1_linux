@@ -227,6 +227,27 @@ void radeon_atom_backlight_init(struct radeon_encoder *radeon_encoder,
 	memset(&props, 0, sizeof(props));
 	props.max_brightness = RADEON_MAX_BL_LEVEL;
 	props.type = BACKLIGHT_RAW;
+	pdata->encoder = radeon_encoder;
+	pdata->atom = true;
+	radeon_encoder->backlight_priv = pdata;
+
+	dig = radeon_encoder->enc_priv;
+	if (IS_ENABLED(CONFIG_DRM_LUMINANCE)) {
+		props.brightness = atombios_get_backlight_level(radeon_encoder);
+		if (!props.brightness)
+			props.brightness = RADEON_MAX_BL_LEVEL;
+
+		if (drm_connector_attach_luminance_property(drm_connector, 0,
+							    props.max_brightness,
+							     props.brightness))
+			goto error;
+
+		atombios_set_backlight_level(radeon_encoder, props.brightness);
+		dig->bl_dev = NULL;
+		rdev->mode_info.bl_encoder = radeon_encoder;
+		return;
+	}
+
 	snprintf(bl_name, sizeof(bl_name),
 		 "radeon_bl%d", dev->primary->index);
 	bd = backlight_device_register(bl_name, drm_connector->kdev,
@@ -236,9 +257,6 @@ void radeon_atom_backlight_init(struct radeon_encoder *radeon_encoder,
 		goto error;
 	}
 
-	pdata->encoder = radeon_encoder;
-
-	dig = radeon_encoder->enc_priv;
 	dig->bl_dev = bd;
 
 	bd->props.brightness = radeon_atom_backlight_get_brightness(bd);
@@ -258,6 +276,7 @@ void radeon_atom_backlight_init(struct radeon_encoder *radeon_encoder,
 	return;
 
 error:
+	radeon_encoder->backlight_priv = NULL;
 	kfree(pdata);
 	return;
 }
@@ -282,12 +301,19 @@ static void radeon_atom_backlight_exit(struct radeon_encoder *radeon_encoder)
 	bd = dig->bl_dev;
 	dig->bl_dev = NULL;
 
+	if (IS_ENABLED(CONFIG_DRM_LUMINANCE)) {
+		kfree(radeon_encoder->backlight_priv);
+		radeon_encoder->backlight_priv = NULL;
+		return;
+	}
+
 	if (bd) {
 		struct radeon_legacy_backlight_privdata *pdata;
 
 		pdata = bl_get_data(bd);
 		backlight_device_unregister(bd);
 		kfree(pdata);
+		radeon_encoder->backlight_priv = NULL;
 
 		DRM_INFO("radeon atom LVDS backlight unloaded\n");
 	}

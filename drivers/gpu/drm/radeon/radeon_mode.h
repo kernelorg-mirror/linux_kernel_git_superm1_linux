@@ -283,6 +283,7 @@ struct radeon_mode_info {
 struct radeon_backlight_privdata {
 	struct radeon_encoder *encoder;
 	uint8_t negative;
+	bool atom;
 };
 
 #define MAX_H_CODE_TIMING_LEN 32
@@ -455,6 +456,7 @@ struct radeon_encoder {
 	uint32_t underscan_vborder;
 	struct drm_display_mode native_mode;
 	void *enc_priv;
+	struct radeon_backlight_privdata *backlight_priv;
 	int audio_polling_active;
 	bool is_ext_encoder;
 	u16 caps;
