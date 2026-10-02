@@ -31,6 +31,7 @@
 #include <drm/drm_probe_helper.h>
 #include <drm/radeon_drm.h>
 #include "radeon.h"
+#include "radeon_asic.h"
 #include "radeon_audio.h"
 #include "atom.h"
 
@@ -931,11 +932,44 @@ static int radeon_lvds_set_property(struct drm_connector *connector,
 	return 0;
 }
 
+static void radeon_set_luminance(const struct drm_connector_state *conn_state)
+{
+	struct drm_encoder *encoder = radeon_best_single_encoder(conn_state->connector);
+	struct radeon_encoder *radeon_encoder;
+	struct radeon_backlight_privdata *pdata;
+	u8 level = conn_state->luminance;
+
+	if (!encoder)
+		return;
+
+	radeon_encoder = to_radeon_encoder(encoder);
+	pdata = radeon_encoder->backlight_priv;
+	if (!pdata)
+		return;
+
+	if (pdata->atom) {
+		atombios_set_backlight_level(radeon_encoder, level);
+	} else {
+		if (pdata->negative)
+			level = RADEON_MAX_BL_LEVEL - level;
+		radeon_legacy_set_backlight_level(radeon_encoder, level);
+	}
+}
+
+static void radeon_disable_luminance(const struct drm_connector_state *conn_state)
+{
+	struct drm_connector_state state = *conn_state;
+
+	state.luminance = 0;
+	radeon_set_luminance(&state);
+}
 
 static const struct drm_connector_helper_funcs radeon_lvds_connector_helper_funcs = {
 	.get_modes = radeon_lvds_get_modes,
 	.mode_valid = radeon_lvds_mode_valid,
 	.best_encoder = radeon_best_single_encoder,
+	.set_luminance = radeon_set_luminance,
+	.disable_luminance = radeon_disable_luminance,
 };
 
 static const struct drm_connector_funcs radeon_lvds_connector_funcs = {

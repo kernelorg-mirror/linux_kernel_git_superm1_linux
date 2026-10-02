@@ -403,16 +403,9 @@ void radeon_legacy_backlight_init(struct radeon_encoder *radeon_encoder,
 	memset(&props, 0, sizeof(props));
 	props.max_brightness = RADEON_MAX_BL_LEVEL;
 	props.type = BACKLIGHT_RAW;
-	snprintf(bl_name, sizeof(bl_name),
-		 "radeon_bl%d", dev->primary->index);
-	bd = backlight_device_register(bl_name, drm_connector->kdev,
-				       pdata, &radeon_backlight_ops, &props);
-	if (IS_ERR(bd)) {
-		DRM_ERROR("Backlight registration failed\n");
-		goto error;
-	}
-
 	pdata->encoder = radeon_encoder;
+	pdata->atom = false;
+	radeon_encoder->backlight_priv = pdata;
 
 	backlight_level = (RREG32(RADEON_LVDS_GEN_CNTL) >>
 			   RADEON_LVDS_BL_MOD_LEVEL_SHIFT) & 0xff;
@@ -441,6 +434,36 @@ void radeon_legacy_backlight_init(struct radeon_encoder *radeon_encoder,
 #endif
 	}
 
+	if (IS_ENABLED(CONFIG_DRM_LUMINANCE)) {
+		props.brightness = pdata->negative ?
+			RADEON_MAX_BL_LEVEL - backlight_level : backlight_level;
+		if (drm_connector_attach_luminance_property(drm_connector, 0,
+							    props.max_brightness,
+							     props.brightness))
+			goto error;
+
+		if (rdev->is_atom_bios) {
+			struct radeon_encoder_atom_dig *lvds = radeon_encoder->enc_priv;
+
+			lvds->bl_dev = NULL;
+		} else {
+			struct radeon_encoder_lvds *lvds = radeon_encoder->enc_priv;
+
+			lvds->bl_dev = NULL;
+		}
+		rdev->mode_info.bl_encoder = radeon_encoder;
+		return;
+	}
+
+	snprintf(bl_name, sizeof(bl_name),
+		 "radeon_bl%d", dev->primary->index);
+	bd = backlight_device_register(bl_name, drm_connector->kdev,
+				       pdata, &radeon_backlight_ops, &props);
+	if (IS_ERR(bd)) {
+		DRM_ERROR("Backlight registration failed\n");
+		goto error;
+	}
+
 	if (rdev->is_atom_bios) {
 		struct radeon_encoder_atom_dig *lvds = radeon_encoder->enc_priv;
 		lvds->bl_dev = bd;
@@ -459,6 +482,7 @@ void radeon_legacy_backlight_init(struct radeon_encoder *radeon_encoder,
 	return;
 
 error:
+	radeon_encoder->backlight_priv = NULL;
 	kfree(pdata);
 	return;
 }
@@ -482,12 +506,19 @@ static void radeon_legacy_backlight_exit(struct radeon_encoder *radeon_encoder)
 		lvds->bl_dev = NULL;
 	}
 
+	if (IS_ENABLED(CONFIG_DRM_LUMINANCE)) {
+		kfree(radeon_encoder->backlight_priv);
+		radeon_encoder->backlight_priv = NULL;
+		return;
+	}
+
 	if (bd) {
 		struct radeon_backlight_privdata *pdata;
 
 		pdata = bl_get_data(bd);
 		backlight_device_unregister(bd);
 		kfree(pdata);
+		radeon_encoder->backlight_priv = NULL;
 
 		DRM_INFO("radeon legacy LVDS backlight unloaded\n");
 	}
