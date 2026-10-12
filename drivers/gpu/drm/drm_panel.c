@@ -38,6 +38,19 @@ static LIST_HEAD(panel_list);
  * take look at drm_panel_bridge_add() and devm_drm_panel_bridge_add().
  */
 
+struct panel_bridge {
+	struct drm_bridge bridge;
+	struct drm_connector connector;
+	struct drm_panel *panel;
+	u32 connector_type;
+};
+
+static inline struct panel_bridge *
+drm_connector_to_panel_bridge(const struct drm_connector *connector)
+{
+	return container_of(connector, struct panel_bridge, connector);
+}
+
 static inline struct drm_panel *
 drm_bridge_to_panel(const struct drm_bridge *bridge)
 {
@@ -50,13 +63,6 @@ drm_connector_to_panel(const struct drm_connector *connector)
 	return container_of(connector, struct drm_panel, connector);
 }
 
-struct panel_bridge {
-	struct drm_bridge bridge;
-	struct drm_connector connector;
-	struct drm_panel *panel;
-	u32 connector_type;
-};
-
 static int panel_bridge_connector_get_modes(struct drm_connector *connector)
 {
 	struct drm_panel *panel = drm_connector_to_panel(connector);
@@ -64,9 +70,29 @@ static int panel_bridge_connector_get_modes(struct drm_connector *connector)
 	return drm_panel_get_modes(panel, connector);
 }
 
+static void
+panel_bridge_connector_set_luminance(const struct drm_connector_state *conn_state)
+{
+	struct panel_bridge *panel_bridge =
+		drm_connector_to_panel_bridge(conn_state->connector);
+
+	drm_panel_set_luminance(panel_bridge->panel, conn_state->luminance);
+}
+
+static void
+panel_bridge_connector_disable_luminance(const struct drm_connector_state *conn_state)
+{
+	struct panel_bridge *panel_bridge =
+		drm_connector_to_panel_bridge(conn_state->connector);
+
+	drm_panel_disable_luminance(panel_bridge->panel);
+}
+
 static const struct drm_connector_helper_funcs
 panel_bridge_connector_helper_funcs = {
 	.get_modes = panel_bridge_connector_get_modes,
+	.set_luminance = panel_bridge_connector_set_luminance,
+	.disable_luminance = panel_bridge_connector_disable_luminance,
 };
 
 static const struct drm_connector_funcs panel_bridge_connector_funcs = {
@@ -100,6 +126,10 @@ static int panel_bridge_attach(struct drm_bridge *bridge,
 	}
 
 	drm_panel_bridge_set_orientation(connector, bridge);
+
+	ret = drm_panel_attach_luminance_property(panel, connector);
+	if (ret)
+		return ret;
 
 	drm_connector_attach_encoder(connector, encoder);
 
@@ -860,6 +890,61 @@ exit:
 	mutex_unlock(&panel->follower_lock);
 }
 EXPORT_SYMBOL(drm_panel_disable);
+
+/**
+ * drm_panel_attach_luminance_property - expose a panel backlight through DRM
+ * @panel: panel whose backlight is controlled
+ * @connector: connector on which to expose the property
+ *
+ * The backlight class device remains the internal hardware backend. When the
+ * luminance UAPI is enabled, userspace controls that backend through the DRM
+ * connector property instead.
+ *
+ * Return: 0 on success or a negative error code
+ */
+int drm_panel_attach_luminance_property(struct drm_panel *panel,
+					struct drm_connector *connector)
+{
+	struct backlight_device *backlight;
+
+	if (!IS_ENABLED(CONFIG_DRM_LUMINANCE) || !panel)
+		return 0;
+
+	backlight = panel->backlight;
+	if (!backlight)
+		return 0;
+
+	return drm_connector_attach_luminance_property(connector, 0,
+					backlight->props.max_brightness,
+					backlight->props.brightness);
+}
+EXPORT_SYMBOL(drm_panel_attach_luminance_property);
+
+/**
+ * drm_panel_set_luminance - set a panel backlight's relative luminance
+ * @panel: panel whose backlight is controlled
+ * @luminance: relative luminance level
+ */
+void drm_panel_set_luminance(struct drm_panel *panel, unsigned int luminance)
+{
+	if (!panel || !panel->backlight)
+		return;
+
+	panel->backlight->props.brightness = luminance;
+	backlight_update_status(panel->backlight);
+}
+EXPORT_SYMBOL(drm_panel_set_luminance);
+
+/**
+ * drm_panel_disable_luminance - turn off a panel backlight
+ * @panel: panel whose backlight is controlled
+ */
+void drm_panel_disable_luminance(struct drm_panel *panel)
+{
+	if (panel)
+		backlight_disable(panel->backlight);
+}
+EXPORT_SYMBOL(drm_panel_disable_luminance);
 
 /**
  * drm_panel_get_modes - probe the available display modes of a panel
