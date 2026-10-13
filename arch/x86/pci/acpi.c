@@ -167,6 +167,20 @@ static const struct dmi_system_id pci_crs_quirks[] __initconst = {
 	},
 
 	/*
+	 * Some Yoga C940 firmware reports "Yoga C940" as the product version,
+	 * so it does not match the Lenovo *IIL* product version quirk above.
+	 * See https://bugzilla.kernel.org/show_bug.cgi?id=206459
+	 */
+	{
+		.callback = set_no_e820,
+		.ident = "Lenovo Yoga C940-14IIL",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
+			DMI_MATCH(DMI_PRODUCT_FAMILY, "Yoga C940-14IIL"),
+		},
+	},
+
+	/*
 	 * The Acer Spin 5 (SP513-54N) has the same E820 reservation covering
 	 * the entire _CRS 32-bit window issue as the Lenovo *IIL* models.
 	 * See https://bugs.launchpad.net/bugs/1884232
@@ -190,6 +204,20 @@ static const struct dmi_system_id pci_crs_quirks[] __initconst = {
 		.ident = "Clevo X170KM-G Barebone",
 		.matches = {
 			DMI_MATCH(DMI_BOARD_NAME, "X170KM-G"),
+		},
+	},
+
+	/*
+	 * The Clevo NL4XLU has the same E820 reservation covering the entire
+	 * _CRS 32-bit window issue as the X170KM-G.
+	 * See https://bugzilla.kernel.org/show_bug.cgi?id=216565
+	 */
+	{
+		.callback = set_no_e820,
+		.ident = "Clevo NL4XLU Barebone",
+		.matches = {
+			DMI_MATCH(DMI_BOARD_VENDOR, "CLEVO"),
+			DMI_MATCH(DMI_BOARD_NAME, "NL4XLU"),
 		},
 	},
 	{}
