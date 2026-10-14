@@ -6,6 +6,8 @@
 
 #include <linux/acpi.h>
 #include <linux/acpi_amd_wbrf.h>
+#include <asm/byteorder.h>
+#include <linux/slab.h>
 
 /*
  * Functions bit vector for WBRF method
@@ -29,6 +31,17 @@ struct amd_wbrf_ranges_out {
 	struct freq_band_range	band_list[MAX_NUM_OF_WBRF_RANGES];
 } __packed;
 
+struct wbrf_record_entry {
+	__le64		start;
+	__le64		end;
+} __packed;
+
+struct wbrf_record_payload {
+	__le32			num_of_ranges;
+	__le32			action;
+	struct wbrf_record_entry	ranges[];
+} __packed;
+
 static const guid_t wifi_acpi_dsm_guid =
 	GUID_INIT(0x7b7656cf, 0xdc3d, 0x4c1c,
 		  0x83, 0xe9, 0x66, 0xe7, 0x21, 0xde, 0x30, 0x70);
@@ -41,9 +54,11 @@ static BLOCKING_NOTIFIER_HEAD(wbrf_chain_head);
 
 static int wbrf_record(struct acpi_device *adev, uint8_t action, struct wbrf_ranges_in_out *in)
 {
+	struct wbrf_record_payload *payload __free(kfree) = NULL;
 	union acpi_object argv4;
+	union acpi_object args[1];
 	u32 num_of_ranges = 0;
-	u32 num_of_elements;
+	size_t payload_len;
 	u32 arg_idx = 0;
 	int ret;
 	u32 i;
@@ -64,45 +79,38 @@ static int wbrf_record(struct acpi_device *adev, uint8_t action, struct wbrf_ran
 	if (num_of_ranges != in->num_of_ranges)
 		return -EINVAL;
 
-	/*
-	 * Every input frequency band comes with two end points(start/end)
-	 * and each is accounted as an element. Meanwhile the range count
-	 * and action type are accounted as an element each.
-	 * So, the total element count = 2 * num_of_ranges + 1 + 1.
-	 */
-	num_of_elements = 2 * num_of_ranges + 2;
-
-	union acpi_object *tmp __free(kfree) = kzalloc_objs(*tmp,
-							    num_of_elements);
-	if (!tmp)
+	payload_len = sizeof(*payload) + num_of_ranges * sizeof(payload->ranges[0]);
+	payload = kzalloc(payload_len, GFP_KERNEL);
+	if (!payload)
 		return -ENOMEM;
 
-	argv4.package.type = ACPI_TYPE_PACKAGE;
-	argv4.package.count = num_of_elements;
-	argv4.package.elements = tmp;
+	payload->num_of_ranges = cpu_to_le32(num_of_ranges);
+	payload->action = cpu_to_le32(action);
 
-	/* save the number of ranges*/
-	tmp[0].integer.type = ACPI_TYPE_INTEGER;
-	tmp[0].integer.value = num_of_ranges;
-
-	/* save the action(WBRF_RECORD_ADD/REMOVE/RETRIEVE) */
-	tmp[1].integer.type = ACPI_TYPE_INTEGER;
-	tmp[1].integer.value = action;
-
-	arg_idx = 2;
+	arg_idx = 0;
 	for (i = 0; i < ARRAY_SIZE(in->band_list); i++) {
 		if (!in->band_list[i].start || !in->band_list[i].end)
 			continue;
 
-		tmp[arg_idx].integer.type = ACPI_TYPE_INTEGER;
-		tmp[arg_idx++].integer.value = in->band_list[i].start;
-		tmp[arg_idx].integer.type = ACPI_TYPE_INTEGER;
-		tmp[arg_idx++].integer.value = in->band_list[i].end;
+		payload->ranges[arg_idx].start = cpu_to_le64(in->band_list[i].start);
+		payload->ranges[arg_idx].end = cpu_to_le64(in->band_list[i].end);
+		arg_idx++;
 	}
 
+	argv4.package.type = ACPI_TYPE_PACKAGE;
+	argv4.package.count = ARRAY_SIZE(args);
+	argv4.package.elements = args;
+
+	args[0].type = ACPI_TYPE_BUFFER;
+	args[0].buffer.length = payload_len;
+	args[0].buffer.pointer = (u8 *)payload;
+
 	union acpi_object *obj __free(kfree) =
-		acpi_evaluate_dsm(adev->handle, &wifi_acpi_dsm_guid,
-				  WBRF_REVISION, WBRF_RECORD, &argv4);
+		acpi_evaluate_dsm(adev->handle,
+				  &wifi_acpi_dsm_guid,
+				  WBRF_REVISION,
+				  WBRF_RECORD,
+				  &argv4);
 
 	if (!obj)
 		return -EINVAL;
@@ -236,8 +244,11 @@ int amd_wbrf_retrieve_freq_band(struct device *dev, struct wbrf_ranges_in_out *o
 	param.string.length = 0;
 	param.string.pointer = NULL;
 
-	obj = acpi_evaluate_dsm(adev->handle, &wifi_acpi_dsm_guid,
-							WBRF_REVISION, WBRF_RETRIEVE, &param);
+	obj = acpi_evaluate_dsm(adev->handle,
+				&wifi_acpi_dsm_guid,
+				WBRF_REVISION,
+				WBRF_RETRIEVE,
+				&param);
 	if (!obj)
 		return -EINVAL;
 
