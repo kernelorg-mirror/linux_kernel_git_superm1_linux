@@ -1222,6 +1222,13 @@ void iommu_detach_device_pasid(struct iommu_domain *domain,
 ioasid_t iommu_alloc_global_pasid(struct device *dev);
 void iommu_free_global_pasid(ioasid_t pasid);
 
+/*
+ * IOMMU availability API - for use by subsystems that require IOMMU
+ * isolation to provide security guarantees.
+ */
+bool iommu_is_available(void);
+void iommu_set_available(void);
+
 /* PCI device reset functions */
 int pci_dev_reset_iommu_prepare(struct pci_dev *pdev);
 void pci_dev_reset_iommu_done(struct pci_dev *pdev);
@@ -1557,6 +1564,13 @@ static inline int pci_dev_reset_iommu_prepare(struct pci_dev *pdev)
 static inline void pci_dev_reset_iommu_done(struct pci_dev *pdev)
 {
 }
+
+static inline bool iommu_is_available(void)
+{
+	return false;
+}
+static inline void iommu_set_available(void) {}
+
 #endif /* CONFIG_IOMMU_API */
 
 #ifdef CONFIG_IRQ_MSI_IOMMU

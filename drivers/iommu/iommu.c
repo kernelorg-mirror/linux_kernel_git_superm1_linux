@@ -309,6 +309,13 @@ int iommu_device_register(struct iommu_device *iommu,
 		iommu_device_unregister(iommu);
 	else
 		WRITE_ONCE(iommu->ready, true);
+	/*
+	 * Mark IOMMU as available if registration succeeded and bus probing
+	 * succeeded. This enables security checks (e.g. lockdown IOMMU check)
+	 * that depend on knowing whether hardware IOMMU isolation is present.
+	 */
+	if (!err)
+		iommu_set_available();
 	return err;
 }
 EXPORT_SYMBOL_GPL(iommu_device_register);
@@ -2960,6 +2967,47 @@ static int __init iommu_init(void)
 	return 0;
 }
 core_initcall(iommu_init);
+
+static bool iommu_available __read_mostly;
+
+/**
+ * iommu_is_available() - Check if IOMMU subsystem is available
+ *
+ * Returns true if at least one IOMMU driver has been registered and
+ * successfully probed, meaning hardware IOMMU support is available on
+ * the platform. Returns false if no IOMMU driver is available.
+ *
+ * This function is intended for use by security subsystems that require
+ * IOMMU isolation to provide meaningful security guarantees (e.g. lockdown).
+ *
+ * Note: This function only reports on whether IOMMU drivers are present,
+ * not whether specific devices are covered. Use device_iommu_capable() or
+ * iommu_group_get() to check per-device IOMMU coverage.
+ *
+ * Context: Can be called at any time after module initialization has begun.
+ * Returns a snapshot of the IOMMU availability state.
+ *
+ * Return: True if IOMMU is available, false otherwise.
+ */
+bool iommu_is_available(void)
+{
+	return iommu_available;
+}
+EXPORT_SYMBOL_GPL(iommu_is_available);
+
+/**
+ * iommu_set_available() - Mark IOMMU as available
+ *
+ * Called by IOMMU drivers during probe to indicate that hardware IOMMU
+ * support is functional on this platform.
+ *
+ * Context: Called from driver probe paths.
+ */
+void iommu_set_available(void)
+{
+	iommu_available = true;
+}
+EXPORT_SYMBOL_GPL(iommu_set_available);
 
 int iommu_set_pgtable_quirks(struct iommu_domain *domain,
 		unsigned long quirk)
