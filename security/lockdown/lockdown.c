@@ -13,7 +13,13 @@
 #include <linux/security.h>
 #include <linux/export.h>
 #include <linux/lsm_hooks.h>
+#include <linux/init.h>
 #include <uapi/linux/lsm.h>
+
+#if IS_ENABLED(CONFIG_X86)
+#include <asm/iommu.h>
+#endif
+#include <linux/iommu.h>
 
 static enum lockdown_reason kernel_locked_down;
 
@@ -88,6 +94,25 @@ static int __init lockdown_lsm_init(void)
 #elif defined(CONFIG_LOCK_DOWN_KERNEL_FORCE_CONFIDENTIALITY)
 	lock_kernel_down("Kernel configuration", LOCKDOWN_CONFIDENTIALITY_MAX);
 #endif
+
+	/*
+	 * If lockdown was activated (via command line or kernel config)
+	 * and IOMMU is disabled, refuse to boot. Without IOMMU, any
+	 * PCI/PCIe device can perform DMA to arbitrary physical memory,
+	 * completely bypassing lockdown protections.
+	 *
+	 * On x86, 'no_iommu' is set early by the 'iommu=off' cmdline
+	 * option during parse_early_param(), before this init function.
+	 */
+#if IS_ENABLED(CONFIG_X86)
+	if (kernel_locked_down > LOCKDOWN_NONE && no_iommu) {
+		pr_err("FATAL: Lockdown is active but IOMMU is disabled.\n");
+		pr_err("FATAL: PCI devices can perform DMA to arbitrary memory,\n");
+		pr_err("FATAL: bypassing all lockdown protections.\n");
+		panic("Lockdown enabled but IOMMU is disabled (no_iommu)\n");
+	}
+#endif
+
 	security_add_hooks(lockdown_hooks, ARRAY_SIZE(lockdown_hooks),
 			   &lockdown_lsmid);
 	return 0;
@@ -170,3 +195,43 @@ DEFINE_LSM(lockdown) = {
 	.init = lockdown_lsm_init,
 	.initcall_core = lockdown_secfs_init,
 };
+
+/*
+ * Late init call to verify IOMMU availability when lockdown is active.
+ * This catches cases where:
+ *  - IOMMU hardware is absent on the platform
+ *  - IOMMU was disabled by driver initialization failure
+ *  - IOMMU was not detected (e.g. broken firmware, missing ACPI tables)
+ *
+ * On x86, we also check no_iommu here as a double-check. The early check
+ * in lockdown_lsm_init() catches 'iommu=off' from the cmdline before
+ * lockdown_lsm_init() runs, but this late check covers any missed cases.
+ */
+static int __init lockdown_check_iommu(void)
+{
+	if (kernel_locked_down > LOCKDOWN_NONE) {
+		/*
+		 * Check generic IOMMU availability (all architectures).
+		 * iommu_is_available() returns true if any IOMMU driver
+		 * registered successfully.
+		 */
+		if (!iommu_is_available()) {
+			pr_err("FATAL: Lockdown is active but no IOMMU driver\n");
+			pr_err("FATAL: registered. PCI devices can DMA to\n");
+			pr_err("FATAL: arbitrary memory, bypassing lockdown.\n");
+			panic("Lockdown enabled but IOMMU not available\n");
+		}
+#if IS_ENABLED(CONFIG_X86)
+		/*
+		 * Also double-check x86-specific flag.
+		 */
+		if (no_iommu) {
+			pr_err("FATAL: Lockdown is active but IOMMU disabled\n");
+			pr_err("FATAL: via kernel command line (iommu=off).\n");
+			panic("Lockdown enabled but IOMMU disabled (iommu=off)\n");
+		}
+#endif
+	}
+	return 0;
+}
+late_initcall(lockdown_check_iommu);
