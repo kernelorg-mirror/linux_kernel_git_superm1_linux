@@ -6464,13 +6464,15 @@ static DEFINE_SPINLOCK(resource_alignment_lock);
  * RETURNS: Resource alignment if it is specified.
  *          Zero if it is not specified.
  */
-static resource_size_t pci_specified_resource_alignment(struct pci_dev *dev,
-							bool *resize)
+resource_size_t pci_specified_resource_alignment(struct pci_dev *dev,
+						 bool *resize)
 {
 	int align_order, count;
 	resource_size_t align = pcibios_default_alignment();
 	const char *p;
 	int ret;
+
+	*resize = false;
 
 	spin_lock(&resource_alignment_lock);
 	p = resource_alignment_param;
@@ -6517,6 +6519,7 @@ out:
 	spin_unlock(&resource_alignment_lock);
 	return align;
 }
+EXPORT_SYMBOL_GPL(pci_specified_resource_alignment);
 
 static void pci_request_resource_alignment(struct pci_dev *dev, int bar,
 					   resource_size_t align, bool resize)
