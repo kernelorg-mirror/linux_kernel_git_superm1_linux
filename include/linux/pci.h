@@ -1230,6 +1230,7 @@ char *pcibios_setup(char *str);
 struct pci_resreq_data {
 	struct pci_dev *dev;
 	resource_size_t user_align;
+	resource_size_t real_align;
 };
 
 resource_size_t pci_specified_resource_alignment(struct pci_dev *dev,
