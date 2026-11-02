@@ -6990,6 +6990,10 @@ Kernel parameters
 			apic=verbose is specified.
 			Example: apic=debug show_lapic=all
 
+	shutdown=legacy [KNL]
+			Use the legacy device shutdown callbacks when powering off
+			the system instead of the hibernation power-off callbacks.
+
 	slab_debug[=options[,slabs][;[options[,slabs]]...]]	[MM]
 			Enabling slab_debug allows one to determine the
 			culprit if slab objects become corrupted. Enabling
