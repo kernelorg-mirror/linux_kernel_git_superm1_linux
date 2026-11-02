@@ -3028,6 +3028,17 @@ static const struct dmi_system_id bridge_d3_blacklist[] = {
 			DMI_MATCH(DMI_BOARD_VERSION, "95.33"),
 		},
 	},
+	{
+		/*
+		 * Suspending Root Port 9 gates a clock used by the onboard
+		 * RTL8168 behind Root Port 12, making the NIC inaccessible.
+		 */
+		.ident = "Lenovo ThinkCentre M90n-1",
+		.matches = {
+			DMI_MATCH(DMI_BOARD_VENDOR, "LENOVO"),
+			DMI_MATCH(DMI_BOARD_NAME, "314D"),
+		},
+	},
 #endif
 	{ }
 };
@@ -3073,6 +3084,10 @@ bool pci_bridge_d3_possible(struct pci_dev *bridge)
 		if (bridge->is_thunderbolt)
 			return true;
 
+		/* Firmware D3 support does not override known platform bugs. */
+		if (dmi_check_system(bridge_d3_blacklist))
+			return false;
+
 		/* Platform might know better if the bridge supports D3 */
 		if (platform_pci_bridge_d3(bridge))
 			return true;
@@ -3083,9 +3098,6 @@ bool pci_bridge_d3_possible(struct pci_dev *bridge)
 		 * 2018 because there was no OS support.
 		 */
 		if (IS_ENABLED(CONFIG_X86) && bridge->is_pciehp)
-			return false;
-
-		if (dmi_check_system(bridge_d3_blacklist))
 			return false;
 
 		/*
