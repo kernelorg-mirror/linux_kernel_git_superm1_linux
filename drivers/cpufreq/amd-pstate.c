@@ -866,8 +866,7 @@ static void amd_pstate_adjust_perf(struct cpufreq_policy *policy,
 		min_perf = perf.min_limit_perf;
 
 	max_perf = perf.max_limit_perf;
-	if (max_perf < min_perf)
-		max_perf = min_perf;
+	min_perf = min(min_perf, max_perf);
 
 	amd_pstate_update(policy, min_perf, des_perf, max_perf, true,
 			policy->governor->flags);
@@ -2212,6 +2211,7 @@ static int amd_pstate_resume(struct cpufreq_policy *policy)
 	int ret;
 
 	/* Set CPPC_REQ to last sane value until the governor updates it */
+	cur_perf = clamp(cur_perf, perf.min_limit_perf, perf.max_limit_perf);
 	ret = amd_pstate_update_perf(policy, perf.min_limit_perf, cur_perf, perf.max_limit_perf,
 				     0U, false);
 	if (ret)
