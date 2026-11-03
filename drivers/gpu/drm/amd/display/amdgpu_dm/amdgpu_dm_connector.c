@@ -3373,6 +3373,22 @@ STATIC_IFN_KUNIT int amdgpu_dm_i2c_xfer(struct i2c_adapter *i2c_adap,
 	int i;
 	int result = -EIO;
 
+	if (!i2c->oem && ddc_service->link) {
+		struct dc_link *link = ddc_service->link;
+		struct amdgpu_dm_connector *aconnector = link->priv;
+
+		/*
+		 * DDC to a native DisplayPort sink (SST, MST or eDP) is
+		 * tunneled over the AUX channel; the physical i2c pins only
+		 * reach DVI/HDMI sinks (e.g. DP++ with a passive adapter).
+		 * Use the same aux_mode selection as the EDID read helpers so
+		 * the connector's single "ddc" bus works for either sink.
+		 */
+		if (aconnector && link->aux_mode &&
+		    aconnector->dm_dp_aux.aux.ddc.algo)
+			return i2c_transfer(&aconnector->dm_dp_aux.aux.ddc, msgs, num);
+	}
+
 	if (!ddc_service->ddc_pin)
 		return result;
 
