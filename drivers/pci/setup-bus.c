@@ -1265,7 +1265,7 @@ static resource_size_t __pbus_size_mem(struct pci_bus *bus,
 				       struct list_head *realloc_head)
 {
 	struct pci_dev *dev;
-	resource_size_t winsize = 0, win_align;
+	resource_size_t winsize = 0, win_align, final_winsize;
 	resource_size_t aligns[PCI_RES_ALIGN_RANGE] = {};
 	resource_size_t partial_blocks = 0, max_partial = 0;
 	unsigned int nonaligning = 0, rescount = 0;
@@ -1379,7 +1379,28 @@ bad_alignment:
 	*head_align = calculate_head_align(aligns, max_order);
 	*head_align = max(*head_align, win_align);
 
-	return ALIGN(max(winsize + gap, min_size), win_align);
+	final_winsize = ALIGN(max(winsize + gap, min_size), win_align);
+
+	if (bus->self) {
+		int idx = pci_resource_num(bus->self, b_res);
+		const char *r_name = pci_resource_name(bus->self, idx);
+		struct resource print_res = *b_res; /* b_res update is delayed */
+
+		resource_set_range(&print_res, *head_align, final_winsize);
+		if (final_winsize) {
+			print_res.flags &= ~(IORESOURCE_UNSET |
+					     IORESOURCE_DISABLED);
+		} else {
+			print_res.flags |= IORESOURCE_DISABLED;
+		}
+
+		pci_dbg(bus->self, "%s %pR: non-aligning %u/%u gap %llx partials %llx\n",
+			r_name, &print_res, nonaligning, rescount,
+			(unsigned long long)gap,
+			(unsigned long long)partial_blocks);
+	}
+
+	return final_winsize;
 }
 
 /**
