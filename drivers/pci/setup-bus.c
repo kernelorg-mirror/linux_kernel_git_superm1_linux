@@ -1309,6 +1309,8 @@ static void pbus_size_mem(struct pci_bus *bus, struct resource *b_res,
 				continue;
 
 			align = pci_resource_alignment(dev, r);
+			if (!align)
+				goto bad_alignment;
 			/*
 			 * aligns[0] is for 1MB (since bridge memory
 			 * windows are always at least 1MB aligned), so
@@ -1317,6 +1319,7 @@ static void pbus_size_mem(struct pci_bus *bus, struct resource *b_res,
 			 */
 			order = max_t(int, __ffs64(align) - __ffs(SZ_1M), 0);
 			if (order >= ARRAY_SIZE(aligns)) {
+bad_alignment:
 				pci_warn(dev, "%s %pR: disabling; bad alignment %#llx\n",
 					 r_name, r, (unsigned long long) align);
 				r->flags = 0;
