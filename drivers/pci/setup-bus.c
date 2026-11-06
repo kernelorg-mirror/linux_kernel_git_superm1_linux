@@ -1315,7 +1315,7 @@ static void pbus_size_mem(struct pci_bus *bus, struct resource *b_res,
 			 * keep "order" from being negative for smaller
 			 * resources.
 			 */
-			order = max_t(int, __ffs(align) - __ffs(SZ_1M), 0);
+			order = max_t(int, __ffs64(align) - __ffs(SZ_1M), 0);
 			if (order >= ARRAY_SIZE(aligns)) {
 				pci_warn(dev, "%s %pR: disabling; bad alignment %#llx\n",
 					 r_name, r, (unsigned long long) align);
