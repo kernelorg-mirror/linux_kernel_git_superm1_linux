@@ -515,6 +515,8 @@ void devm_pci_alloc_host_bridge_release(void *data);
 struct device *pci_get_host_bridge_device(struct pci_dev *dev);
 void pci_put_host_bridge_device(struct device *dev);
 
+resource_size_t pci_specified_resource_alignment(struct pci_dev *dev,
+						 bool *resize);
 void pci_resize_resource_set_size(struct pci_dev *dev, int resno, int size);
 int pci_do_resource_release_and_resize(struct pci_dev *dev, int resno, int size,
 				       int exclude_bars);
