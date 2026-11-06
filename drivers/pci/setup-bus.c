@@ -1013,10 +1013,9 @@ static resource_size_t calculate_iosize(resource_size_t size,
 
 static resource_size_t calculate_memsize(resource_size_t size,
 					 resource_size_t min_size,
-					 resource_size_t children_add_size,
 					 resource_size_t align)
 {
-	size = max(size + children_add_size, min_size);
+	size = max(size, min_size);
 	return ALIGN(size, align);
 }
 
@@ -1208,18 +1207,20 @@ static resource_size_t calculate_head_align(resource_size_t *aligns,
  * Account an optional resource or the optional part of the resource in bridge
  * window size.
  *
- * Return: %true if the resource is entirely optional.
+ * Return: %true if the resource is skipped due to optionality.
  */
 static bool pbus_size_mem_optional(struct pci_dev *dev, int resno,
-				   resource_size_t align,
-				   struct list_head *realloc_head,
-				   resource_size_t *add_align,
-				   resource_size_t *children_add_size)
+				   resource_size_t *size,
+				   resource_size_t *align,
+				   bool add_optional,
+				   struct list_head *realloc_head)
 {
 	struct resource *res = pci_resource_n(dev, resno);
 	bool optional = pci_resource_is_optional(dev, resno);
-	resource_size_t r_size = resource_size(res);
 	struct pci_dev_resource *dev_res = NULL;
+
+	if (!add_optional)
+		return optional;
 
 	if (!realloc_head)
 		return false;
@@ -1232,8 +1233,8 @@ static bool pbus_size_mem_optional(struct pci_dev *dev, int resno,
 	if (pci_resource_is_bridge_win(resno)) {
 		dev_res = res_to_dev_res(realloc_head, res);
 		if (dev_res) {
-			*children_add_size += dev_res->add_size;
-			*add_align = max(*add_align, dev_res->min_align);
+			*size += dev_res->add_size;
+			*align = max(*align, dev_res->min_align);
 		}
 	}
 
@@ -1246,22 +1247,28 @@ static bool pbus_size_mem_optional(struct pci_dev *dev, int resno,
 	 * on the list.
 	 */
 	if (!dev_res)
-		pci_dev_res_add_to_list(realloc_head, dev, res, 0, align);
-	*children_add_size += r_size;
-	*add_align = max(align, *add_align);
+		pci_dev_res_add_to_list(realloc_head, dev, res, 0, *align);
 
-	return true;
+	return false;
 }
 
 /* Alignments from 1MB to 128TB */
 #define PCI_RES_MAX_ALIGN	SZ_128T
 #define PCI_RES_ALIGN_RANGE	(ilog2(PCI_RES_MAX_ALIGN) - ilog2(SZ_1M) + 1)
 
+/*
+ * Since bridge memory windows are always at least 1MB aligned, keep order
+ * from being negative for smaller resources.
+ */
+static int pci_align_to_order(resource_size_t align)
+{
+	return max_t(int, __ffs64(align) - __ffs(SZ_1M), 0);
+}
+
 static resource_size_t __pbus_size_mem(struct pci_bus *bus,
 				       struct resource *b_res,
 				       resource_size_t *head_align,
-				       resource_size_t *add_align,
-				       resource_size_t *children_add_size,
+				       bool add_optional,
 				       struct list_head *realloc_head)
 {
 	struct pci_dev *dev;
@@ -1288,13 +1295,7 @@ static resource_size_t __pbus_size_mem(struct pci_bus *bus,
 			align = pci_resource_alignment(dev, r);
 			if (!align)
 				goto bad_alignment;
-			/*
-			 * aligns[0] is for 1MB (since bridge memory
-			 * windows are always at least 1MB aligned), so
-			 * keep "order" from being negative for smaller
-			 * resources.
-			 */
-			order = max_t(int, __ffs64(align) - __ffs(SZ_1M), 0);
+			order = pci_align_to_order(align);
 			if (order >= ARRAY_SIZE(aligns)) {
 bad_alignment:
 				pci_warn(dev, "%s %pR: disabling; bad alignment %#llx\n",
@@ -1303,12 +1304,17 @@ bad_alignment:
 				continue;
 			}
 
-			if (pbus_size_mem_optional(dev, i, align,
-						   realloc_head, add_align,
-						   children_add_size))
-				continue;
-
 			r_size = resource_size(r);
+			/*
+			 * This has side-effects on size so it should not be
+			 * called while the resource can still be rejected
+			 * (such as the order check above). As align could
+			 * have changed, the order has to be recalculated.
+			 */
+			if (pbus_size_mem_optional(dev, i, &r_size, &align,
+						   add_optional, realloc_head))
+				continue;
+			order = pci_align_to_order(align);
 			winsize += max(r_size, align);
 
 			/*
@@ -1352,7 +1358,6 @@ static void pbus_size_mem(struct pci_bus *bus, struct resource *b_res,
 			  struct list_head *realloc_head)
 {
 	resource_size_t min_align, win_align, size, size0, size1 = 0;
-	resource_size_t children_add_size = 0;
 	resource_size_t add_align = 0;
 
 	if (!b_res)
@@ -1363,20 +1368,19 @@ static void pbus_size_mem(struct pci_bus *bus, struct resource *b_res,
 		return;
 
 	win_align = pci_min_window_alignment(bus, b_res->flags);
-	size = __pbus_size_mem(bus, b_res, &min_align, &add_align,
-			       &children_add_size, realloc_head);
-	size0 = calculate_memsize(size, realloc_head ? 0 : add_size,
-				  0, win_align);
+	size = __pbus_size_mem(bus, b_res, &min_align, !realloc_head,
+			       realloc_head);
+	size0 = calculate_memsize(size, realloc_head ? 0 : add_size, win_align);
 
 	if (size0) {
 		resource_set_range(b_res, min_align, size0);
 		b_res->flags &= ~IORESOURCE_DISABLED;
 	}
 
-	if (realloc_head && (add_size > 0 || children_add_size > 0)) {
+	if (realloc_head) {
+		size = __pbus_size_mem(bus, b_res, &add_align, true, realloc_head);
 		add_align = max(min_align, add_align);
-		size1 = calculate_memsize(size, add_size, children_add_size,
-					  win_align);
+		size1 = calculate_memsize(size, add_size, win_align);
 	}
 
 	if (!size0 && !size1) {
