@@ -1267,6 +1267,9 @@ static resource_size_t __pbus_size_mem(struct pci_bus *bus,
 	struct pci_dev *dev;
 	resource_size_t winsize = 0, win_align;
 	resource_size_t aligns[PCI_RES_ALIGN_RANGE] = {};
+	resource_size_t partial_blocks = 0, max_partial = 0;
+	unsigned int nonaligning = 0, rescount = 0;
+	resource_size_t remainders = 0, gap = 0;
 	int max_order = 0;
 
 	win_align = pci_min_window_alignment(bus, b_res->flags);
@@ -1277,7 +1280,7 @@ static resource_size_t __pbus_size_mem(struct pci_bus *bus,
 
 		pci_dev_for_each_resource(dev, r, i) {
 			const char *r_name = pci_resource_name(dev, i);
-			resource_size_t r_size, align;
+			resource_size_t r_size, align, remainder;
 
 			if (!pdev_resources_assignable(dev) ||
 			    !pdev_resource_should_fit(r))
@@ -1320,13 +1323,63 @@ bad_alignment:
 				aligns[order] += align;
 			if (order > max_order)
 				max_order = order;
+
+			rescount++;
+
+			if (r_size <= align)
+				continue;
+			remainder = r_size - ALIGN_DOWN(r_size, align);
+			if (!remainder)
+				continue;
+
+			nonaligning++;
+			remainders += remainder;
+			partial_blocks += align;
+			max_partial = max(max_partial, align);
 		}
+	}
+
+	if (nonaligning && rescount == 2) {
+		resource_size_t second_align = max_partial;
+
+		/*
+		 * With two resources having differing alignment
+		 * requirements, the gap size can be optimized by aligning it
+		 * only up to the smaller of the alignment requirements.
+		 *
+		 * This also allows two composite remainders to share the
+		 * same block when the resources have the same alignment
+		 * requirement which is common with multi-GPU setups where
+		 * each bridge window contains a small BAR and a large BAR.
+		 * The small BARs can share the same align block.
+		 *
+		 * As this sizing phase cannot influence resource assignment
+		 * order and placement, this is only guaranteed to work with
+		 * two non-aligning resources.
+		 */
+		if (nonaligning == 2) {
+			second_align = partial_blocks - max_partial;
+		} else {
+			for (unsigned int i = 0; i < max_order; i++) {
+				if (!aligns[i])
+					continue;
+
+				second_align = min(second_align,
+						   1ULL << (i + __ffs(SZ_1M)));
+				break;
+			}
+		}
+
+		gap = ALIGN(remainders, second_align) - remainders;
+	} else if (nonaligning >= 2 ||
+		   (nonaligning && rescount > nonaligning)) {
+		gap = partial_blocks - remainders;
 	}
 
 	*head_align = calculate_head_align(aligns, max_order);
 	*head_align = max(*head_align, win_align);
 
-	return ALIGN(max(winsize, min_size), win_align);
+	return ALIGN(max(winsize + gap, min_size), win_align);
 }
 
 /**
