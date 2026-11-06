@@ -1011,14 +1011,6 @@ static resource_size_t calculate_iosize(resource_size_t size,
 	return ALIGN(max(size, old_size), align);
 }
 
-static resource_size_t calculate_memsize(resource_size_t size,
-					 resource_size_t min_size,
-					 resource_size_t align)
-{
-	size = max(size, min_size);
-	return ALIGN(size, align);
-}
-
 resource_size_t __weak pcibios_window_alignment(struct pci_bus *bus,
 						unsigned long type)
 {
@@ -1269,6 +1261,7 @@ static resource_size_t __pbus_size_mem(struct pci_bus *bus,
 				       struct resource *b_res,
 				       resource_size_t *head_align,
 				       bool add_optional,
+				       resource_size_t min_size,
 				       struct list_head *realloc_head)
 {
 	struct pci_dev *dev;
@@ -1333,7 +1326,7 @@ bad_alignment:
 	*head_align = calculate_head_align(aligns, max_order);
 	*head_align = max(*head_align, win_align);
 
-	return winsize;
+	return ALIGN(max(winsize, min_size), win_align);
 }
 
 /**
@@ -1357,8 +1350,7 @@ static void pbus_size_mem(struct pci_bus *bus, struct resource *b_res,
 			  resource_size_t add_size,
 			  struct list_head *realloc_head)
 {
-	resource_size_t min_align, win_align, size, size0, size1 = 0;
-	resource_size_t add_align = 0;
+	resource_size_t min_align, size0, size1 = 0, add_align = 0;
 
 	if (!b_res)
 		return;
@@ -1367,20 +1359,17 @@ static void pbus_size_mem(struct pci_bus *bus, struct resource *b_res,
 	if (resource_assigned(b_res))
 		return;
 
-	win_align = pci_min_window_alignment(bus, b_res->flags);
-	size = __pbus_size_mem(bus, b_res, &min_align, !realloc_head,
-			       realloc_head);
-	size0 = calculate_memsize(size, realloc_head ? 0 : add_size, win_align);
-
+	size0 = __pbus_size_mem(bus, b_res, &min_align, !realloc_head,
+				realloc_head ? 0 : add_size, realloc_head);
 	if (size0) {
 		resource_set_range(b_res, min_align, size0);
 		b_res->flags &= ~IORESOURCE_DISABLED;
 	}
 
 	if (realloc_head) {
-		size = __pbus_size_mem(bus, b_res, &add_align, true, realloc_head);
+		size1 = __pbus_size_mem(bus, b_res, &add_align, true,
+					add_size, realloc_head);
 		add_align = max(min_align, add_align);
-		size1 = calculate_memsize(size, add_size, win_align);
 	}
 
 	if (!size0 && !size1) {
