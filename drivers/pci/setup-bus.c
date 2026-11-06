@@ -1257,51 +1257,27 @@ static bool pbus_size_mem_optional(struct pci_dev *dev, int resno,
 #define PCI_RES_MAX_ALIGN	SZ_128T
 #define PCI_RES_ALIGN_RANGE	(ilog2(PCI_RES_MAX_ALIGN) - ilog2(SZ_1M) + 1)
 
-/**
- * pbus_size_mem() - Size the memory window of a given bus
- *
- * @bus:		The bus
- * @b_res:		The bridge window resource
- * @add_size:		Additional memory window
- * @realloc_head:	Track the additional memory window on this list
- *
- * Calculate the size of the bridge window @b_res and minimal alignment
- * which guarantees that all child resources fit in this size.
- *
- * Set the bus resource start/end to indicate the required size if there an
- * available unassigned bus resource of the desired @type.
- *
- * Add optional resource requests to the @realloc_head list if it is
- * supplied.
- */
-static void pbus_size_mem(struct pci_bus *bus, struct resource *b_res,
-			  resource_size_t add_size,
-			  struct list_head *realloc_head)
+static resource_size_t __pbus_size_mem(struct pci_bus *bus,
+				       struct resource *b_res,
+				       resource_size_t *head_align,
+				       resource_size_t *add_align,
+				       resource_size_t *children_add_size,
+				       struct list_head *realloc_head)
 {
 	struct pci_dev *dev;
-	resource_size_t min_align, win_align, align, size, size0, size1 = 0;
+	resource_size_t winsize = 0, win_align;
 	resource_size_t aligns[PCI_RES_ALIGN_RANGE] = {};
-	int order, max_order;
-	resource_size_t children_add_size = 0;
-	resource_size_t add_align = 0;
+	int max_order = 0;
 
-	if (!b_res)
-		return;
-
-	/* If resource is already assigned, nothing more to do */
-	if (resource_assigned(b_res))
-		return;
-
-	max_order = 0;
-	size = 0;
+	win_align = pci_min_window_alignment(bus, b_res->flags);
 
 	list_for_each_entry(dev, &bus->devices, bus_list) {
 		struct resource *r;
-		int i;
+		int order, i;
 
 		pci_dev_for_each_resource(dev, r, i) {
 			const char *r_name = pci_resource_name(dev, i);
-			resource_size_t r_size;
+			resource_size_t r_size, align;
 
 			if (!pdev_resources_assignable(dev) ||
 			    !pdev_resource_should_fit(r))
@@ -1328,12 +1304,12 @@ bad_alignment:
 			}
 
 			if (pbus_size_mem_optional(dev, i, align,
-						   realloc_head, &add_align,
-						   &children_add_size))
+						   realloc_head, add_align,
+						   children_add_size))
 				continue;
 
 			r_size = resource_size(r);
-			size += max(r_size, align);
+			winsize += max(r_size, align);
 
 			/*
 			 * If resource's size is larger than its alignment,
@@ -1348,9 +1324,47 @@ bad_alignment:
 		}
 	}
 
+	*head_align = calculate_head_align(aligns, max_order);
+	*head_align = max(*head_align, win_align);
+
+	return winsize;
+}
+
+/**
+ * pbus_size_mem() - Size the memory window of a given bus
+ *
+ * @bus:		The bus
+ * @b_res:		The bridge window resource
+ * @add_size:		Additional memory window
+ * @realloc_head:	Track the additional memory window on this list
+ *
+ * Calculate the size of the bridge window @b_res and minimal alignment
+ * which guarantees that all child resources fit in this size.
+ *
+ * Set the bus resource start/end to indicate the required size if there an
+ * available unassigned bus resource of the desired @type.
+ *
+ * Add optional resource requests to the @realloc_head list if it is
+ * supplied.
+ */
+static void pbus_size_mem(struct pci_bus *bus, struct resource *b_res,
+			  resource_size_t add_size,
+			  struct list_head *realloc_head)
+{
+	resource_size_t min_align, win_align, size, size0, size1 = 0;
+	resource_size_t children_add_size = 0;
+	resource_size_t add_align = 0;
+
+	if (!b_res)
+		return;
+
+	/* If resource is already assigned, nothing more to do */
+	if (resource_assigned(b_res))
+		return;
+
 	win_align = pci_min_window_alignment(bus, b_res->flags);
-	min_align = calculate_head_align(aligns, max_order);
-	min_align = max(min_align, win_align);
+	size = __pbus_size_mem(bus, b_res, &min_align, &add_align,
+			       &children_add_size, realloc_head);
 	size0 = calculate_memsize(size, realloc_head ? 0 : add_size,
 				  0, win_align);
 
