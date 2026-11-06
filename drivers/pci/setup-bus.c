@@ -19,6 +19,7 @@
 #include <linux/bug.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
+#include <linux/log2.h>
 #include <linux/minmax.h>
 #include <linux/module.h>
 #include <linux/pci.h>
@@ -1256,6 +1257,10 @@ static bool pbus_size_mem_optional(struct pci_dev *dev, int resno,
 	return true;
 }
 
+/* Alignments from 1MB to 128TB */
+#define PCI_RES_MAX_ALIGN	SZ_128T
+#define PCI_RES_ALIGN_RANGE	(ilog2(PCI_RES_MAX_ALIGN) - ilog2(SZ_1M) + 1)
+
 /**
  * pbus_size_mem() - Size the memory window of a given bus
  *
@@ -1279,7 +1284,7 @@ static void pbus_size_mem(struct pci_bus *bus, struct resource *b_res,
 {
 	struct pci_dev *dev;
 	resource_size_t min_align, win_align, align, size, size0, size1 = 0;
-	resource_size_t aligns[28] = {}; /* Alignments from 1MB to 128TB */
+	resource_size_t aligns[PCI_RES_ALIGN_RANGE] = {};
 	int order, max_order;
 	resource_size_t children_add_size = 0;
 	resource_size_t add_align = 0;
