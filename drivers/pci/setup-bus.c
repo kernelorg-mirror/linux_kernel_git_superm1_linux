@@ -301,20 +301,18 @@ static bool pdev_resources_assignable(struct pci_dev *dev)
 	return true;
 }
 
-static bool pdev_resource_assignable(struct pci_dev *dev, struct resource *res)
+static bool pdev_resource_assignable(struct resource *res)
 {
-	int idx = pci_resource_num(dev, res);
-
 	if (!res->flags)
 		return false;
 
-	if (pci_resource_is_bridge_win(idx) && res->flags & IORESOURCE_DISABLED)
+	if (res->flags & IORESOURCE_DISABLED)
 		return false;
 
 	return true;
 }
 
-static bool pdev_resource_should_fit(struct pci_dev *dev, struct resource *res)
+static bool pdev_resource_should_fit(struct resource *res)
 {
 	if (resource_assigned(res))
 		return false;
@@ -322,7 +320,7 @@ static bool pdev_resource_should_fit(struct pci_dev *dev, struct resource *res)
 	if (res->flags & IORESOURCE_PCI_FIXED)
 		return false;
 
-	return pdev_resource_assignable(dev, res);
+	return pdev_resource_assignable(res);
 }
 
 /* Sort resources by alignment */
@@ -340,7 +338,7 @@ static void pdev_sort_resources(struct pci_dev *dev, struct list_head *head)
 		resource_size_t r_align;
 		struct list_head *n;
 
-		if (!pdev_resource_should_fit(dev, r))
+		if (!pdev_resource_should_fit(r))
 			continue;
 
 		r_align = pci_resource_alignment(dev, r);
@@ -1094,7 +1092,7 @@ static void pbus_size_io(struct pci_bus *bus, resource_size_t add_size,
 			if (resource_assigned(r) || !(r->flags & IORESOURCE_IO))
 				continue;
 
-			if (!pdev_resource_assignable(dev, r))
+			if (!pdev_resource_assignable(r))
 				continue;
 
 			r_size = resource_size(r);
@@ -1305,7 +1303,7 @@ static void pbus_size_mem(struct pci_bus *bus, struct resource *b_res,
 			resource_size_t r_size;
 
 			if (!pdev_resources_assignable(dev) ||
-			    !pdev_resource_should_fit(dev, r))
+			    !pdev_resource_should_fit(r))
 				continue;
 			if (b_res != pbus_select_window(bus, r))
 				continue;
